@@ -1,0 +1,23 @@
+{
+  "id": "EXP-2026-000001",
+  "deteccion_id": "D-0001",
+  "minuto_deteccion": 2.0,
+  "host_stream": "s1.pelotaya.test",
+  "pagina": "https://pelotaya.test/en-vivo",
+  "ip_servidor": "203.0.113.10",
+  "asn": 64600,
+  "marca_de_agua": "LP26-PRA-OFI-S048211",
+  "prefijo_coincidente": "LP26-PRA-OFI",
+  "dominios_en_la_ip": ["s1.pelotaya.test", "s1-respaldo.pelotaya.test"],
+  "riesgo_colateral": true,
+  "tipo_recomendado": "dominio",
+  "objetivo_recomendado": "s1.pelotaya.test",
+  "hash_captura": "4063d4976a25164a...",
+  "sellos_tiempo": [2.0],
+  "vencimiento_propuesto": 105,
+  "promocion": [
+    {"red": "x", "url": "https://x.example/futbolya_ok/status/1001", "minuto": 1.0}
+  ],
+
+  "_nota": "Ejemplo real generado por evidencia.ExpedienteBuilder contra el simulador oficial (escenario_practica.json). Se recomienda bloqueo por DOMINIO y no por IP porque la IP 203.0.113.10 está compartida con s1-respaldo.pelotaya.test (riesgo de daño colateral si se bloqueara toda la IP). El expediente fue aprobado por el juez de turno (jueza-laura-ficticia / juez-martin-ejemplo según el minuto) desde el dashboard de servidor_juez.py, y a partir de ahí despacho.py firmó y envió la orden a los 4 proveedores con capacidad de bloqueo por dominio."
+}
