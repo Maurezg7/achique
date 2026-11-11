@@ -21,12 +21,22 @@ de la plataforma.
 
 > El simulador usa el puerto 8080 por defecto, que choca con el panel del juez; por eso se lo levanta en el 8000.
 
+Esta plataforma usa el simulador y los datos del repo oficial del desafío. Cloná ambos repos lado a lado y corré los dos comandos desde la carpeta `desafio-futbol`:
+
+```
+Documentos/
+├── desafio-futbol/        # repo oficial (simulador + datos)
+└── mi_solucion-futbol/    # este repo
+```
+
 ```bash
+cd desafio-futbol
+
 # Terminal 1: el simulador oficial
 python3 simulador/servidor.py --escenario datos/escenario_practica.json --acelerar 20 --puerto 8000
 
 # Terminal 2: esta plataforma
-python3 mi_solucion/plataforma.py --simulador http://localhost:8000 --puerto-juez 8080 \
+python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --puerto-juez 8080 \
     --juzgados datos/juzgados.json --log salida/auditoria.jsonl
 ```
 
