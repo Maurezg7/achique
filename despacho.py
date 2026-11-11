@@ -62,6 +62,7 @@ class Despachador:
                                  juez_id=orden_firmada["juez_id"], respuesta=resp)
 
     def reintentar_fallidas(self) -> None:
+        minuto_actual = pedir(self.base, "/estado").get("minuto_actual", 0)
         for clave, eo in list(self.ordenes.items()):
             if eo.estado in ("aplicada", "vencida", "levantada"):
                 continue
@@ -69,11 +70,17 @@ class Despachador:
             nuevo_estado = resp.get("estado") if isinstance(resp, dict) else None
             if nuevo_estado:
                 eo.estado = nuevo_estado
-            if eo.estado == "fallida" and eo.intentos < 3:
-                eo.intentos += 1
-                self.auditoria.registrar("reintento_orden", proveedor=eo.proveedor_id,
-                                         expediente_id=eo.expediente_id, intento=eo.intentos)
-                self._enviar(eo.proveedor_id, eo.expediente_id, eo.tipo, eo.objetivo, eo.vence_min)
+            if eo.estado != "fallida" or eo.intentos >= 3:
+                continue
+            if minuto_actual >= eo.vence_min:
+                self.auditoria.registrar("reintento_descartado_por_vencimiento", proveedor=eo.proveedor_id,
+                                         expediente_id=eo.expediente_id, vence_min=eo.vence_min,
+                                         minuto_actual=minuto_actual)
+                continue
+            eo.intentos += 1
+            self.auditoria.registrar("reintento_orden", proveedor=eo.proveedor_id,
+                                     expediente_id=eo.expediente_id, intento=eo.intentos)
+            self._enviar(eo.proveedor_id, eo.expediente_id, eo.tipo, eo.objetivo, eo.vence_min)
 
     def levantar_orden(self, proveedor_id: str, orden_id: str, motivo: str) -> dict:
         firma = self.jueces.firmar_levantamiento(orden_id, motivo)
