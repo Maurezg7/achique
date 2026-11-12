@@ -22,6 +22,8 @@ ESPERA_CRITICA_MIN = 2.5
 # chicos tardan hasta ~6′ en aplicar (en la práctica FibraValle confirma 4–5,5′ después de Aurora).
 CONFIRMACION_ATENCION_MIN = 7.0
 AVISO_FIN_MIN = 10.0
+# Margen tras el vencimiento para que el proveedor libere el bloqueo y el despacho lo vea como `vencida`.
+GRACIA_VENCIMIENTO_MIN = 2.0
 AVISO_TURNO_MIN = 5.0
 NIVELES = ("critico", "atencion", "info", "ok")
 
@@ -112,10 +114,10 @@ class Asistente:
 
         ip_activas = [g for g in grupos if any(t == "ip" and e == "aplicada" for e, t in g["proveedores"].values())]
         if ip_activas:
-            vencidas = [g for g in ip_activas if m >= g["vence_min"]]
-            if finalizado or vencidas:
+            vencidas = [g for g in ip_activas if m >= g["vence_min"] + GRACIA_VENCIMIENTO_MIN]
+            if vencidas:
                 alertas.append(_alerta("critico", "ip-post-partido", "Bloqueos por IP activos después del vencimiento",
-                                       f"{len(vencidas or ip_activas)} bloqueo(s) por IP siguen aplicados: deberían haber vencido.",
+                                       f"{len(vencidas)} bloqueo(s) por IP siguen aplicados: deberían haber vencido.",
                                        "aside"))
             elif fin - m <= AVISO_FIN_MIN:
                 alertas.append(_alerta("info", "ip-fin", f"{len(ip_activas)} bloqueo(s) por IP vencen solos en el min {fin:.0f}",
