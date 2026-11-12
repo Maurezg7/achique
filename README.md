@@ -1,64 +1,134 @@
-# Solución — Desafío Fútbol (bloqueo de streaming pirata)
+# Tarjeta Roja — bloqueo judicial de señal pirata en vivo
 
-Plataforma en Python 3.9+ sin dependencias externas. Arquitectura con **juez humano real**
-(dashboard web), no un auto-aprobador: la firma de cada orden sale del juez de turno, nunca
-de la plataforma.
+**Tarjeta Roja** es una plataforma federal de órdenes de bloqueo en vivo, el MVP para el **Desafío Fútbol** (Hackathon Argentina Space 2026): durante un partido, cada stream
+pirata detectado llega como **expediente con evidencia verificable** a un **juez de turno humano**, que
+aprueba con un clic; la plataforma **firma con el juez de turno en ese instante**, envía la orden a
+**cada proveedor en el tipo de bloqueo que acepta**, sigue su confirmación, reintenta las fallidas y
+deja que los bloqueos por IP **venzan solos** al terminar el partido. Todo queda en una **auditoría
+encadenada por hashes** y en un **registro público de transparencia**.
 
-## Módulos
+Python 3.9+ y **solo biblioteca estándar**. Corre contra el simulador oficial; no bloquea nada real.
 
-| Archivo | Responsabilidad |
+## Resultado en el partido de práctica
+
+`evaluacion/verificar.py` sobre una corrida completa (`--acelerar 30`, juez aprobando a mano). Salida
+completa en [`entrega/evaluacion_practica.txt`](entrega/evaluacion_practica.txt).
+
+| Métrica | Resultado |
 |---|---|
-| `evidencia.py` | Verifica cada detección contra `/partido` y `/dns-pasivo`: descarta retransmisiones legítimas de licenciatarios, detecta riesgo de daño colateral por IP compartida y recomienda bloqueo por dominio o por IP. |
-| `firmas.py` | Resuelve el juez de turno en el instante exacto de firmar (nunca cacheado, porque el turno rota) y firma con HMAC-SHA256 según el esquema del README oficial. La clave de firma nunca sale de este módulo. |
-| `mesa.py` | Estado compartido con un único lock: expedientes y reclamos pendientes/decididos. El juez decide acá; nadie firma desde esta clase. |
-| `despacho.py` | Firma y envía la orden aprobada a cada proveedor con la capacidad necesaria, reintenta automáticamente las fallidas (hasta 3 veces) y firma los levantamientos. |
-| `reclamos.py` | Ante un reclamo, decide si el dominio reclamante es el pirata real (mantener bloqueo) o es daño colateral (levantar, y si fue por IP, reemplazar por un bloqueo de dominio preciso contra el verdadero pirata). |
-| `auditoria.py` | Registro de auditoría con cadena de hashes (tipo blockchain de logs): cualquier alteración posterior se detecta con `verificar_cadena()`. |
-| `servidor_juez.py` | Dashboard HTTP del juez: ve cada expediente con su evidencia completa y cada reclamo con la propuesta de la plataforma, y aprueba o rechaza con un clic. Se autorefresca cada 4 s. |
-| `plataforma.py` | Punto de entrada: levanta los 4 hilos (ingesta, despacho, reclamos, servidor del juez) y los conecta. |
+| Fases piratas bloqueadas | **7 de 7**, todas con **100 % de clientes cubiertos** |
+| Primer bloqueo confirmado | 1,6 – 2,1 min desde la detección (incluye la decisión del juez) |
+| Visibilidad residual promedio | 6,6 % |
+| Daño colateral / falsos positivos | **0 / 0** (ni el licenciatario ni el VOD de otro partido) |
+| Bloqueos por IP activos después del partido | **0** |
+| Órdenes rechazadas / firmadas fuera de turno | **0 / 0** (hubo cambio de turno en el minuto 50) |
+| Cadena de auditoría | íntegra (`python3 auditoria.py entrega/auditoria_ejemplo.jsonl`) |
+
+La recomendación IP/dominio coincidió en los 7 expedientes con la `bloqueo_recomendado` de la verdad del escenario.
 
 ## Cómo correrla
 
-> El simulador usa el puerto 8080 por defecto, que choca con el panel del juez; por eso se lo levanta en el 8000.
-
-Esta plataforma usa el simulador y los datos del repo oficial del desafío. Cloná ambos repos lado a lado y corré los dos comandos desde la carpeta `desafio-futbol`:
+El repo oficial `desafio-futbol` (simulador + datos) va al lado de este:
 
 ```
 Documentos/
-├── desafio-futbol/        # repo oficial (simulador + datos)
+├── desafio-futbol/        # simulador, datos/, evaluacion/verificar.py
 └── mi_solucion-futbol/    # este repo
 ```
 
 ```bash
 cd desafio-futbol
+# Terminal 1: simulador oficial
+python3 simulador/servidor.py --escenario datos/escenario_practica.json --acelerar 30 --puerto 8000
 
-# Terminal 1: el simulador oficial
-python3 simulador/servidor.py --escenario datos/escenario_practica.json --acelerar 20 --puerto 8000
-
-# Terminal 2: esta plataforma
-python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --puerto-juez 8080 \
+# Terminal 2: la plataforma
+python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --puerto-juez 8090 \
     --juzgados datos/juzgados.json --log salida/auditoria.jsonl
 ```
 
-Abrir `http://localhost:8080/` — ahí aparecen los expedientes y reclamos a medida que llegan,
-con un botón de aprobar/rechazar para cada uno. Nada se firma ni se envía sin ese clic.
+- **Mesa del juez:** <http://localhost:8090> — aprobar o rechazar cada expediente (nadie aprueba solo).
+- **Registro público:** <http://localhost:8090/transparencia> (y `/transparencia.json`).
+- Cada expediente se exporta a `salida/expedientes/EXP-….json`.
+- El marcador muestra por defecto **Azul Juniors vs Rojo Plate** por la ficticia **LFA · Liga de Fútbol Argentino**
+  (alusiones de demo, sin logos reales); los equipos se cambian con `--local` y `--visitante`. Los goles del
+  marcador son ilustrativos y no intervienen en ninguna decisión.
 
-## Decisiones de diseño clave
+Al terminar el partido (y los 5 min de gracia):
 
-- **Domino > IP cuando hay riesgo de daño colateral.** Si la IP del stream pirata aparece
-  con más de un dominio en el DNS pasivo, se recomienda bloquear por dominio aunque eso
-  implique no cortar un espejo en la misma IP: se prioriza no afectar sitios legítimos.
-- **El juez nunca firma directo.** `servidor_juez.py` solo escribe una decisión en `Mesa`;
-  el hilo de despacho es el único que llama a `firmas.py` y solo cuando ve `estado="aprobado"`.
-  Así la clave de firma jamás pasa por el proceso HTTP que mira un humano.
-- **Reclamos con verificación, no con confianza ciega.** Un reclamo nunca se resuelve solo
-  porque alguien se queja: se cruza el dominio reclamante contra los streams piratas
-  detectados por la propia plataforma. Si coincide, se propone *mantener* el bloqueo (puede
-  ser el pirata disfrazándose de víctima) — y aun así pasa por el juez.
-- **Auditoría a prueba de alteración.** Cada entrada incluye el hash de la anterior; probado
-  en vivo con `python auditoria.py <archivo>`.
+```bash
+python3 evaluacion/verificar.py --log salida/registro.jsonl              # métricas oficiales
+python3 ../mi_solucion-futbol/auditoria.py salida/auditoria.jsonl        # Cadena íntegra: SÍ
+python3 ../mi_solucion-futbol/evidencia.py salida/expedientes/EXP-2026-000001.json   # Expediente íntegro: SÍ
+```
 
-Probado de punta a punta contra el simulador real: detección → expediente → aprobación del
-juez → despacho a los proveedores con capacidad → reintento de fallidas → reclamo automático
-→ propuesta → aprobación → levantamiento + reemplazo preciso. Cadena de auditoría verificada
-íntegra en cada corrida.
+Tests (sin dependencias, sin red):
+
+```bash
+cd mi_solucion-futbol && python3 -m unittest discover -s tests -v
+```
+
+## Arquitectura
+
+```
+detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez humano: aprobar / rechazar)
+                (expediente)      │
+                                  ▼ solo lo "aprobado"
+                            despacho.py ── firmas.py (juez de turno AHORA) ──► proveedores
+                                  │            ▲                                  │
+                            reclamos.py ───────┘ levantar + precisar          confirmación
+                                  │                                               │
+                            auditoria.py (cadena de hashes) ◄─────── cada paso ───┘
+```
+
+| Archivo | Responsabilidad |
+|---|---|
+| `evidencia.py` | Verifica la marca de agua contra `/partido`, descarta licenciatarios en su dominio y señales de otro partido, identifica servidor (host, IP, ASN, organización), evalúa riesgo colateral con DNS pasivo, calcula hashes y **sella** el expediente. |
+| `mesa.py` | Estado compartido con un único lock: expedientes (con re-detecciones), reclamos, decisiones del juez (auditadas) y estado de cada orden. |
+| `firmas.py` | HMAC-SHA256 según el README oficial con el juez de turno resuelto **en el instante de firmar** (nunca cacheado). |
+| `despacho.py` | Único que firma. Envía a cada proveedor en el tipo que acepta, sigue la orden hasta `aplicada` y `vencida`, reintenta fallidas (sin multiplicarlas) y firma levantamientos. |
+| `reclamos.py` | Verifica cada reclamo, propone mantener / levantar / levantar y precisar, y ejecuta lo que el juez aprobó en **todos** los proveedores afectados. |
+| `auditoria.py` | JSONL append-only encadenado por SHA-256; `verificar_cadena()` detecta cualquier edición o borrado. |
+| `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. |
+| `plataforma.py` | Punto de entrada: hilos de ingesta, despacho, reclamos y servidor HTTP. |
+
+## Decisiones clave
+
+- **El juez siempre decide.** `servidor_juez.py` solo escribe una decisión en `Mesa`; `despacho.py` firma
+  únicamente lo aprobado. Sin juez de turno no se puede decidir ni firmar. La clave nunca pasa por HTTP.
+- **IP o dominio, con criterio.** Se bloquea la IP cuando solo sirve al sitio pirata (incluidos sus
+  espejos: `s1` y `s1-respaldo.pelotaya.test` comparten dominio base, y bloquear la IP corta a ambos). Si
+  la IP sirve **otro** sitio, si el ASN es CDN / hosting compartido, o si no hay datos de DNS pasivo, se
+  pide el **dominio**. Nunca se convierte un bloqueo de dominio en uno de IP.
+- **Cobertura total según capacidad.** Un proveedor que solo bloquea por dominio recibe el dominio del
+  stream cuando el expediente pide IP: es el host del pirata, así que no agrega daño colateral y sus
+  clientes no quedan afuera (en la práctica, FibraValle pasa de 0 % a 100 % de cobertura).
+- **Una re-detección no es otra orden.** Si el mismo servidor (host + IP) vuelve a aparecer, se suma como
+  evidencia al expediente existente; si el pirata cambia de servidor, se abre un expediente nuevo.
+- **Evidencia que se puede auditar.** SHA-256 de los bytes de la captura, de la detección original y un
+  sello de todo el expediente; sellos de tiempo de partido y UTC. Cada paso (detección descartada, expediente
+  creado, decisión, orden enviada, confirmada, fallida, reintentada, vencida, reclamo) queda en la cadena.
+- **Reclamos con verificación.** Un licenciatario o un dominio nunca detectado se propone levantar (y
+  precisar si era un bloqueo por IP); un dominio detectado como pirata se propone mantener. Siempre decide el juez.
+
+## Supuestos
+
+- El dominio base se aproxima con las dos últimas etiquetas del host (válido para `.test` / `.example`;
+  en producción se usaría la Public Suffix List).
+- El vencimiento propuesto es el fin del partido (`fin_min`) para IP y dominio; el proveedor lo aplica solo.
+- Quien hace clic en la Mesa del juez es el juez de turno que informa `/estado` (la demo no tiene login).
+- La firma HMAC con claves de demostración reemplaza a la firma digital real del juez.
+
+## Qué existía antes del evento
+
+Todo el código de este repositorio se escribió durante el hackathon, a partir del 11 de noviembre de 2026
+(ver el historial de git). No se reutilizó código propio previo ni se usaron librerías externas: solo la
+biblioteca estándar de Python 3.9+. El simulador, los datos y `evaluacion/verificar.py` son del repositorio
+oficial `desafio-futbol` y no están copiados acá. Usamos un asistente de código con IA (Devin) durante el desarrollo.
+
+## Entregables (`entrega/`)
+
+- `expediente_ejemplo.json` (dominio, IP compartida en CDN) y `expediente_ejemplo_ip.json` (IP dedicada).
+- `auditoria_ejemplo.jsonl` — auditoría completa de la corrida. **El día 3 se reemplazan por los del partido final.**
+- `evaluacion_practica.txt` — salida de `verificar.py`.
+- `propuesta_normativa.md` — propuesta normativa de 1 página.
+- `presentacion.pptx` y `guion_pitch.md` — pitch.

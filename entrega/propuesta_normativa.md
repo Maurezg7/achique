@@ -15,8 +15,17 @@ Un registro único (mantenido por el regulador de telecomunicaciones) con los pr
 internet alcanzados, su capacidad técnica declarada (bloqueo por IP, por dominio, o ambos) y
 un canal de recepción de órdenes estandarizado (misma API para todos, no un trámite distinto
 por proveedor). Sin esto, cada juzgado termina reinventando el circuito con cada proveedor.
+La orden se emite **en el tipo que cada proveedor declaró**: un proveedor chico que solo bloquea
+por dominio recibe el dominio, no una IP que no puede aplicar. Los costos de implementación de
+los proveedores chicos (bajo cierto número de clientes) deberían cubrirse con un fondo a cargo
+de los titulares de derechos que piden los bloqueos.
 
-## 3. Plazos máximos
+## 3. Plazos máximos y duración
+
+- **Duración:** el bloqueo por IP vence al terminar el evento (más una gracia corta); el bloqueo
+  por dominio puede extenderse solo con una nueva resolución fundada, nunca de forma indefinida.
+- **Decisión judicial:** un juez de turno 24/7 durante los eventos, con plazo de minutos para
+  aprobar o rechazar cada expediente, y sus fundamentos registrados.
 
 - **Aplicación de la orden:** el proveedor tiene un máximo (p. ej. 5 minutos) desde la
   recepción para aplicarla o reportar por qué no puede.
