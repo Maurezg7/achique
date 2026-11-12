@@ -53,6 +53,7 @@ en `tarjeta_roja/web/` y se sirve en `/static/` con lista blanca. Verificaciones
 | `despacho.py` | Firma y envía a cada proveedor con capacidad, reintenta fallidas, firma levantamientos. |
 | `reclamos.py` | Propone mantener / levantar / levantar_y_precisar; ejecuta lo que el juez aprobó. |
 | `auditoria.py` | JSONL encadenado por hash. |
+| `asistente.py` | Asistente del juez por reglas (sin red): alertas, explicaciones y siguiente paso. Solo lee snapshots; nunca decide. |
 | `servidor_juez.py` | UI del juez, una sola página en vivo (`/` + `/fragmento` cada 1,5 s, POST por fetch). |
 | `plataforma.py` | Punto de entrada: hilos de ingesta, despacho, reclamos y servidor del juez. |
 
