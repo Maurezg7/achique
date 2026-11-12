@@ -1,0 +1,48 @@
+{
+  "id": "EXP-2026-000001",
+  "deteccion_id": "D-0001",
+  "minuto_deteccion": 2.0,
+  "host_stream": "s1.pelotaya.test",
+  "stream_url": "https://s1.pelotaya.test/hls/en-vivo/index.m3u8",
+  "pagina": "https://pelotaya.test/en-vivo",
+  "ip_servidor": "203.0.113.10",
+  "asn": 64600,
+  "organizacion": "Bruma Hosting Dedicado (ficticio)",
+  "marca_de_agua": "LP26-PRA-OFI-S048211",
+  "prefijo_coincidente": "LP26-PRA-OFI",
+  "origen_marca": "Señal oficial del titular (plataforma propia)",
+  "dominios_en_la_ip": [
+    "s1.pelotaya.test",
+    "s1-respaldo.pelotaya.test"
+  ],
+  "otros_sitios_en_la_ip": [],
+  "riesgo_colateral": false,
+  "motivo_riesgo": "La IP solo sirve dominios del mismo sitio pirata",
+  "tipo_recomendado": "ip",
+  "objetivo_recomendado": "203.0.113.10",
+  "hash_captura": "77b14ea8874ef8bbbf99cc292fd820a9e8df09fa4d4c00ebaeb9003e6b9bfbe1",
+  "captura_formato": "mpegts",
+  "captura_duracion_seg": 6,
+  "hash_deteccion": "00314f05742d4f839f11b597dc4a01b942b3897809d66ab63213c63ce785faaa",
+  "sellos_tiempo": [
+    2.0
+  ],
+  "sello_utc": "2026-11-11T18:53:05+00:00",
+  "vencimiento_propuesto": 105,
+  "verificaciones": [
+    "Marca de agua LP26-PRA-OFI-S048211 coincide con 'Señal oficial del titular (plataforma propia)' (LP26-PRA-OFI)",
+    "s1.pelotaya.test no es dominio autorizado de un licenciatario",
+    "Servidor del video: s1.pelotaya.test → 203.0.113.10 (ASN 64600, Bruma Hosting Dedicado (ficticio))",
+    "La IP solo sirve dominios del mismo sitio pirata",
+    "Captura mpegts de 6 s, SHA-256 calculado"
+  ],
+  "promocion": [
+    {
+      "red": "x",
+      "url": "https://x.example/futbolya_ok/status/1001",
+      "minuto": 1.0
+    }
+  ],
+  "detecciones_adicionales": [],
+  "hash_expediente": "b5419b7d8c6efcb5cb0afee89c454ab58b3a6509f619e9a8a1eb6e76bfcb5ba8"
+}
