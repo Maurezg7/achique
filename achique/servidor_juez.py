@@ -164,7 +164,7 @@ class JuezHandler(BaseHTTPRequestHandler):
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/estilos.css">
 </head><body class="login-body"><form class="login" method="post" action="/login">
 <div class="login-logo">{LOGO_APP}</div><h1>{NOMBRE}</h1><p class="login-sub">Mesa del juez · ingreso</p>{aviso_html}
-<label>Usuario<input name="usuario" autocomplete="username" required autofocus></label>
+<label>Usuario<input name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>
 <label>Contraseña<input name="clave" type="password" autocomplete="current-password" required></label>
 <button class="btn aprobar" type="submit">Ingresar</button>
 <small>Cada juez ve y firma solo lo que le toca mientras está de turno.<br>
