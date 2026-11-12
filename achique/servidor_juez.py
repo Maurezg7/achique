@@ -33,7 +33,7 @@ RANGO_ESTADO = {"aplicada": 6, "recibida": 5, "enviada": 5, "vencida": 4, "levan
 
 LIGA = "Liga de Fútbol Argentino"   # liga ficticia de la demo (alusión, no es la AFA)
 # Página, estilos, script y logos viven en web/ (servidos en /static/). Los logos también se incrustan
-# en el fragmento en vivo: logo.svg (tarjeta roja con la señal tachada) y liga.svg (escudo ficticio).
+# en el fragmento en vivo: logo.svg (la "A" de Achique dentro del arco) y liga.svg (escudo ficticio).
 WEB = Path(__file__).resolve().parent / "web"
 ESTATICOS = {"estilos.css": "text/css; charset=utf-8", "app.js": "application/javascript; charset=utf-8",
              "logo.svg": "image/svg+xml", "liga.svg": "image/svg+xml"}

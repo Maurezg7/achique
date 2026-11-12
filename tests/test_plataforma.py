@@ -12,9 +12,9 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tarjeta_roja import despacho, evidencia, firmas  # noqa: E402
-from tarjeta_roja.auditoria import RegistroAuditoria, verificar_cadena  # noqa: E402
-from tarjeta_roja.mesa import Mesa  # noqa: E402
+from achique import despacho, evidencia, firmas  # noqa: E402
+from achique.auditoria import RegistroAuditoria, verificar_cadena  # noqa: E402
+from achique.mesa import Mesa  # noqa: E402
 
 JUZGADOS = {"juzgados": [
     {"id": "jg-a", "nombre": "Juzgado A", "jurisdiccion": "X",

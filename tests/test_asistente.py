@@ -6,9 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_plataforma import ConSimulador, deteccion  # noqa: E402
-from tarjeta_roja.asistente import Asistente  # noqa: E402
-from tarjeta_roja.auditoria import verificar_cadena  # noqa: E402
-from tarjeta_roja.mesa import DecisionReclamo  # noqa: E402
+from achique.asistente import Asistente  # noqa: E402
+from achique.auditoria import verificar_cadena  # noqa: E402
+from achique.mesa import DecisionReclamo  # noqa: E402
 
 
 def est(minuto=10.0, turno=("jueza-a",), finalizado=False, fin=105.0):

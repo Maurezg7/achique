@@ -1,6 +1,6 @@
-# Tarjeta Roja — bloqueo judicial de señal pirata en vivo
+# Achique — bloqueo judicial de señal pirata en vivo
 
-**Tarjeta Roja** es una plataforma federal de órdenes de bloqueo en vivo, el MVP para el **Desafío Fútbol** (Hackathon Argentina Space 2026): durante un partido, cada stream
+**Achique** es una plataforma federal de órdenes de bloqueo en vivo, el MVP para el **Desafío Fútbol** (Hackathon Argentina Space 2026): durante un partido, cada stream
 pirata detectado llega como **expediente con evidencia verificable** a un **juez de turno humano**, que
 aprueba con un clic; la plataforma **firma con el juez de turno en ese instante**, envía la orden a
 **cada proveedor en el tipo de bloqueo que acepta**, sigue su confirmación, reintenta las fallidas y
@@ -25,9 +25,9 @@ Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entr
 |---|---|
 | Circuito completo | detección → expediente → juez de turno → proveedores → confirmación → vencimiento ([Arquitectura](#arquitectura)) |
 | Daño colateral | IP compartida o CDN ⇒ se pide el **dominio**; tarjeta "Riesgo de daño colateral" y explicación del asistente |
-| Evidencia verificable | `entrega/expediente_ejemplo*.json`, `python3 -m tarjeta_roja.evidencia` |
+| Evidencia verificable | `entrega/expediente_ejemplo*.json`, `python3 -m achique.evidencia` |
 | Firma humana y de turno | `firmas.py` resuelve el juez de turno al firmar; sin auto-aprobación |
-| Auditoría | `python3 -m tarjeta_roja.auditoria entrega/auditoria_ejemplo.jsonl` → *Cadena íntegra: SÍ* |
+| Auditoría | `python3 -m achique.auditoria entrega/auditoria_ejemplo.jsonl` → *Cadena íntegra: SÍ* |
 | Transparencia | `/transparencia` y `/transparencia.json` |
 | Pitch | `entrega/presentacion.pptx`, `entrega/guion_pitch.md`, `entrega/guion_video.md` |
 
@@ -44,7 +44,7 @@ completa en [`entrega/evaluacion_practica.txt`](entrega/evaluacion_practica.txt)
 | Daño colateral / falsos positivos | **0 / 0** (ni el licenciatario ni el VOD de otro partido) |
 | Bloqueos por IP activos después del partido | **0** |
 | Órdenes rechazadas / firmadas fuera de turno | **0 / 0** (hubo cambio de turno en el minuto 50) |
-| Cadena de auditoría | íntegra (`python3 -m tarjeta_roja.auditoria entrega/auditoria_ejemplo.jsonl`) |
+| Cadena de auditoría | íntegra (`python3 -m achique.auditoria entrega/auditoria_ejemplo.jsonl`) |
 
 La recomendación IP/dominio coincidió en los 7 expedientes con la `bloqueo_recomendado` de la verdad del escenario.
 
@@ -63,7 +63,7 @@ cd desafio-futbol
 # Terminal 1: simulador oficial
 python3 simulador/servidor.py --escenario datos/escenario_practica.json --acelerar 30 --puerto 8000
 
-# Terminal 2: Tarjeta Roja
+# Terminal 2: Achique
 python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --puerto-juez 8090 \
     --juzgados datos/juzgados.json --log salida/auditoria.jsonl
 ```
@@ -80,11 +80,11 @@ Al terminar el partido (y los 5 min de gracia):
 ```bash
 python3 evaluacion/verificar.py --log salida/registro.jsonl     # métricas oficiales
 cd ../mi_solucion-futbol
-python3 -m tarjeta_roja.auditoria ../desafio-futbol/salida/auditoria.jsonl                     # Cadena íntegra: SÍ
-python3 -m tarjeta_roja.evidencia ../desafio-futbol/salida/expedientes/EXP-2026-000001.json    # Expediente íntegro: SÍ
+python3 -m achique.auditoria ../desafio-futbol/salida/auditoria.jsonl                     # Cadena íntegra: SÍ
+python3 -m achique.evidencia ../desafio-futbol/salida/expedientes/EXP-2026-000001.json    # Expediente íntegro: SÍ
 ```
 
-`python3 plataforma.py` es un atajo; también se puede correr con `python3 -m tarjeta_roja` desde la raíz del repo.
+`python3 plataforma.py` es un atajo; también se puede correr con `python3 -m achique` desde la raíz del repo.
 
 Tests (sin dependencias, sin red):
 
@@ -96,10 +96,10 @@ cd mi_solucion-futbol && python3 -m unittest discover -s tests -v
 
 ```
 mi_solucion-futbol/
-├── plataforma.py              # atajo: python3 plataforma.py … (= python3 -m tarjeta_roja)
-├── tarjeta_roja/              # el paquete de la plataforma (solo biblioteca estándar)
+├── plataforma.py              # atajo: python3 plataforma.py … (= python3 -m achique)
+├── achique/              # el paquete de la plataforma (solo biblioteca estándar)
 │   ├── __init__.py            # nombre y lema
-│   ├── __main__.py            # python3 -m tarjeta_roja
+│   ├── __main__.py            # python3 -m achique
 │   ├── plataforma.py          # main(): hilos de ingesta, despacho, reclamos y servidor HTTP
 │   ├── evidencia.py           # expediente + verificación de sello (CLI)
 │   ├── mesa.py                # estado compartido y decisiones del juez
@@ -127,7 +127,7 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
                             auditoria.py (cadena de hashes) ◄─────── cada paso ───┘
 ```
 
-| Módulo (`tarjeta_roja/`) | Responsabilidad |
+| Módulo (`achique/`) | Responsabilidad |
 |---|---|
 | `evidencia.py` | Verifica la marca de agua contra `/partido`, descarta licenciatarios en su dominio y señales de otro partido, identifica servidor (host, IP, ASN, organización), evalúa riesgo colateral con DNS pasivo, calcula hashes y **sella** el expediente. |
 | `mesa.py` | Estado compartido con un único lock: expedientes (con re-detecciones), reclamos, decisiones del juez (auditadas) y estado de cada orden. |

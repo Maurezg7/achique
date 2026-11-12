@@ -16,7 +16,7 @@ function revisarNuevos() {
   const nuevos = conocidos ? ids.filter(i => !conocidos.has(i)) : [];
   conocidos = new Set([...(conocidos || []), ...ids]);
   const pend = meta.dataset.pendientes.split(',').filter(Boolean).length;
-  document.title = (pend ? '(' + pend + ') ' : '') + 'Tarjeta Roja · Mesa del juez';
+  document.title = (pend ? '(' + pend + ') ' : '') + 'Achique · Mesa del juez';
   if (nuevos.length) avisar(nuevos.length === 1 ? 'Nuevo para decidir: ' + nuevos[0] : nuevos.length + ' nuevos para decidir');
 }
 async function refrescar() {
@@ -102,7 +102,7 @@ function mostrarPaso(desplazar) {
     `<button class="sig" data-g="1">${paso === PASOS.length - 1 ? 'Terminar' : 'Siguiente'}</button></nav>`;
 }
 function iniciarGuia() { paso = 0; guia.hidden = false; delete guia.dataset.paso; mostrarPaso(true); }
-function terminarGuia() { paso = -1; guia.hidden = true; marcar(null); localStorage.setItem('tr-guia-vista', '1'); }
+function terminarGuia() { paso = -1; guia.hidden = true; marcar(null); localStorage.setItem('achique-guia-vista', '1'); }
 guia.addEventListener('click', ev => {
   const g = ev.target.dataset.g; if (!g) return;
   if (g === 'fin' || paso + Number(g) >= PASOS.length) return terminarGuia();
@@ -111,4 +111,4 @@ guia.addEventListener('click', ev => {
 document.addEventListener('keydown', ev => { if (paso >= 0 && ev.key === 'Escape') terminarGuia(); });
 
 refrescar(); setInterval(refrescar, 1500);
-if (FRAG === '/fragmento' && !localStorage.getItem('tr-guia-vista')) setTimeout(iniciarGuia, 1200);
+if (FRAG === '/fragmento' && !localStorage.getItem('achique-guia-vista')) setTimeout(iniciarGuia, 1200);

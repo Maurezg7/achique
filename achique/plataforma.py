@@ -1,4 +1,4 @@
-"""Tarjeta Roja — punto de entrada: arma la plataforma completa y la corre contra el simulador.
+"""Achique — punto de entrada: arma la plataforma completa y la corre contra el simulador.
 
 Hilos:
   - ingesta:   detecciones -> verifica y arma expedientes -> Mesa (NO auto-aprueba)
@@ -8,7 +8,7 @@ Hilos:
 
 Uso (desde la raíz del repo o con el repo en el PYTHONPATH):
   python3 plataforma.py --simulador http://localhost:8000 --puerto-juez 8090
-  python3 -m tarjeta_roja --simulador http://localhost:8000 --puerto-juez 8090
+  python3 -m achique --simulador http://localhost:8000 --puerto-juez 8090
 """
 import argparse
 import json
@@ -77,7 +77,7 @@ class Ingesta:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Tarjeta Roja: plataforma federal de órdenes de bloqueo en vivo")
+    ap = argparse.ArgumentParser(description="Achique: plataforma federal de órdenes de bloqueo en vivo")
     ap.add_argument("--simulador", default="http://localhost:8000")
     ap.add_argument("--puerto-juez", type=int, default=8090)
     ap.add_argument("--log", default="salida/registro_plataforma.jsonl")
@@ -108,7 +108,7 @@ def main() -> None:
         hilo.start()
     servidor_juez = iniciar_servidor_juez(mesa, base, args.puerto_juez, despachador, (args.local, args.visitante))
 
-    print(f"Tarjeta Roja en marcha. Mesa del juez: http://localhost:{args.puerto_juez}/")
+    print(f"Achique en marcha. Mesa del juez: http://localhost:{args.puerto_juez}/")
     print(f"Registro público de transparencia: http://localhost:{args.puerto_juez}/transparencia")
     print(f"Auditoría: {args.log}")
     try:
