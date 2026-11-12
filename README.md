@@ -85,6 +85,7 @@ mi_solucion-futbol/
 │   ├── despacho.py            # único que firma; envío, seguimiento y reintentos
 │   ├── reclamos.py            # verificación y resolución de reclamos
 │   ├── auditoria.py           # cadena de hashes (CLI de verificación)
+│   ├── asistente.py           # asistente del juez: vigila, explica y guía (por reglas, offline)
 │   ├── servidor_juez.py       # Mesa del juez y registro público
 │   └── web/                   # index.html, estilos.css, app.js, logo.svg, liga.svg
 ├── tests/                     # unittest con simulador falso en memoria
@@ -112,7 +113,8 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 | `despacho.py` | Único que firma. Envía a cada proveedor en el tipo que acepta, sigue la orden hasta `aplicada` y `vencida`, reintenta fallidas (sin multiplicarlas) y firma levantamientos. |
 | `reclamos.py` | Verifica cada reclamo, propone mantener / levantar / levantar y precisar, y ejecuta lo que el juez aprobó en **todos** los proveedores afectados. |
 | `auditoria.py` | JSONL append-only encadenado por SHA-256; `verificar_cadena()` detecta cualquier edición o borrado. |
-| `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. La página, estilos, script y logos están en `web/`. |
+| `asistente.py` | Asistente del juez local y por reglas (sin API ni red): vigila demoras de firma, órdenes rechazadas / fallidas / sin confirmar, bloqueos por IP cerca del final, turno y cadena de auditoría; explica cada expediente y reclamo en lenguaje claro y marca el siguiente paso. Sus alertas quedan en la auditoría (`asistente_alerta`). **Recomienda, nunca aprueba ni firma.** También en `/asistente.json`. |
+| `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. Incluye una guía interactiva de 13 pasos (botón 🧭) y "Mostrame dónde", que resalta el elemento a revisar. La página, estilos, script y logos están en `web/`. |
 | `plataforma.py` | Punto de entrada: hilos de ingesta, despacho, reclamos y servidor HTTP. |
 
 ## Decisiones clave
