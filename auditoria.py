@@ -9,7 +9,7 @@ import json
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 GENESIS = "0" * 64
@@ -22,6 +22,8 @@ def _hash_entrada(seq: int, ts: float, evento: str, datos: dict, hash_anterior: 
 
 
 class RegistroAuditoria:
+    """Escribe entradas encadenadas por hash en un archivo JSONL (solo agrega, nunca edita)."""
+
     def __init__(self, ruta: Path):
         self.ruta = ruta
         self.ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -41,12 +43,12 @@ class RegistroAuditoria:
         with self._lock:
             self._seq += 1
             ts = time.time()
-            h = _hash_entrada(self._seq, ts, evento, datos, self._ultimo_hash)
+            hash_nuevo = _hash_entrada(self._seq, ts, evento, datos, self._ultimo_hash)
             entrada = {"seq": self._seq, "ts": ts, "evento": evento, "datos": datos,
-                      "hash_anterior": self._ultimo_hash, "hash": h}
+                      "hash_anterior": self._ultimo_hash, "hash": hash_nuevo}
             self._archivo.write(json.dumps(entrada, ensure_ascii=False) + "\n")
             self._archivo.flush()
-            self._ultimo_hash = h
+            self._ultimo_hash = hash_nuevo
             return entrada
 
 
@@ -58,11 +60,12 @@ def verificar_cadena(ruta: Path) -> bool:
         for linea in f:
             if not linea.strip():
                 continue
-            e = json.loads(linea)
-            esperado = _hash_entrada(e["seq"], e["ts"], e["evento"], e["datos"], anterior)
-            if esperado != e["hash"] or e["hash_anterior"] != anterior:
+            entrada = json.loads(linea)
+            esperado = _hash_entrada(entrada["seq"], entrada["ts"], entrada["evento"],
+                                     entrada["datos"], anterior)
+            if esperado != entrada["hash"] or entrada["hash_anterior"] != anterior:
                 return False
-            anterior = e["hash"]
+            anterior = entrada["hash"]
     return True
 
 

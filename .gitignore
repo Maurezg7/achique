@@ -1,2 +1,11 @@
 __pycache__/
 *.pyc
+
+# Grabaciones de la demo y sus logs (pesados, no van al repo)
+*.mp4
+*.mkv
+entrega/grabacion_demo/
+
+# Logs y salidas locales
+*.log
+salida/
