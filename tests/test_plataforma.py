@@ -42,6 +42,7 @@ class SimuladorFalso:
         self.ordenes = {}         # (proveedor, orden_id) -> dict
         self.estado_inicial = {}  # proveedor -> estado al consultar (p. ej. "fallida")
         self.recibidas = []
+        self.detecciones = []     # lo que devuelve GET /detecciones
 
     def pedir(self, base, ruta, cuerpo=None, metodo="GET"):
         if ruta == "/estado":
@@ -56,6 +57,8 @@ class SimuladorFalso:
             return dict(self.dns[ip], ip=ip, asn=64600) if ip in self.dns else {"error": "sin datos"}
         if ruta == "/proveedores":
             return self.proveedores
+        if ruta.startswith("/detecciones"):
+            return {"minuto_actual": self.minuto, "detecciones": list(self.detecciones)}
         partes = ruta.strip("/").split("/")
         if metodo == "POST" and partes[-1] == "ordenes":
             self.recibidas.append((partes[1], cuerpo))
@@ -415,8 +418,8 @@ class TestMesaConIngreso(ConSimulador):
 
         cookie_a = self._ingresar("a", "clave-a-demo")
         self.assertIn(self.exp.id, self._pedir("GET", "/fragmento", cookie=cookie_a)[2])
-        estado, _, _ = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir", {"decision": "aprobar"},
-                                   cookie=cookie_a, fetch=True)
+        estado, _, _ = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir",
+                                   {"decision": "aprobar", "confirmado": "si"}, cookie=cookie_a, fetch=True)
         self.assertEqual(estado, 204)
         d = self.mesa.expedientes[self.exp.id]
         self.assertEqual((d.estado, d.decidido_por), ("aprobado", "jueza-a"))
@@ -431,6 +434,35 @@ class TestMesaConIngreso(ConSimulador):
         cookie_b = self._ingresar("b", "clave-b-demo")
         self.assertIn(self.exp.id, self._pedir("GET", "/fragmento", cookie=cookie_b)[2])
 
+    def test_aprobar_sin_confirmacion_no_decide_ni_envia_nada(self):
+        """Si el juez no confirma ("¿Seguro que querés bloquear?"), todo queda como estaba."""
+        cookie_a = self._ingresar("a", "clave-a-demo")
+        _, _, frag = self._pedir("GET", "/fragmento", cookie=cookie_a)
+        self.assertIn('data-confirmar="bloqueo"', frag)
+        self.assertIn(f'data-objetivo="{self.exp.objetivo_recomendado}"', frag)
+        estado, _, cuerpo = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir", {"decision": "aprobar"},
+                                        cookie=cookie_a, fetch=True)
+        self.assertEqual(estado, 400)
+        self.assertIn("confirmación", cuerpo)
+        self.assertEqual(self.mesa.expedientes[self.exp.id].estado, "pendiente")
+        self.assertEqual(self.mesa.aprobados_sin_despachar(), [])
+        self.assertEqual(self.sim.recibidas, [])
+        self.assertNotIn("decision_juez", self.auditoria.ruta.read_text(encoding="utf-8"))
+        # Rechazar no necesita esa confirmación (pide un motivo y no bloquea nada).
+        estado, _, _ = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir",
+                                   {"decision": "rechazar", "motivo": "evidencia insuficiente"},
+                                   cookie=cookie_a, fetch=True)
+        self.assertEqual(estado, 204)
+        self.assertEqual(self.mesa.expedientes[self.exp.id].estado, "rechazado")
+        self.assertEqual(self.sim.recibidas, [])
+
+    def test_el_dialogo_de_confirmacion_esta_en_la_pagina(self):
+        cookie_a = self._ingresar("a", "clave-a-demo")
+        self.assertIn('<dialog id="confirmar"', self._pedir("GET", "/", cookie=cookie_a)[2])
+        script = self._pedir("GET", "/static/app.js")[2]
+        self.assertIn("datos.append('confirmado', 'si')", script)
+        self.assertLess(script.index("await confirmar(form.dataset)"), script.index("fetch(form.action"))
+
     def test_salir_cierra_la_sesion(self):
         cookie_a = self._ingresar("a", "clave-a-demo")
         estado, cab, _ = self._pedir("POST", "/logout", cookie=cookie_a)
@@ -440,6 +472,12 @@ class TestMesaConIngreso(ConSimulador):
 
 class TestReanudacion(ConSimulador):
     """Tras un reinicio con el mismo log, la plataforma retoma sin duplicar expedientes ni órdenes."""
+
+    def setUp(self):
+        super().setUp()
+        parche = mock.patch.object(reanudacion, "pedir", self.sim.pedir)
+        parche.start()
+        self.parches.append(parche)
 
     def _plataforma(self):
         auditoria = RegistroAuditoria(Path(self.tmp.name) / "auditoria.jsonl")
@@ -510,6 +548,74 @@ class TestReanudacion(ConSimulador):
         self.assertEqual([p for p, _ in self.sim.recibidas], ["grande", "chico"])
         self.assertEqual(mesa2.expedientes[exp.id].estado, "despachado")
         auditoria2._archivo.close()
+
+    def test_expediente_perdido_o_truncado_se_reconstruye_con_su_numero(self):
+        self.auditoria._archivo.close()
+        d1, d2, d3 = deteccion("D-1"), deteccion("D-2", host="live.otro.test", ip="198.51.100.20"), \
+            deteccion("D-3", host="solo.pirata.test", ip="203.0.113.50")
+        self.sim.detecciones = [d1, d2, d3]
+        auditoria, mesa, builder, d, gestor, ingesta = self._plataforma()
+        for det in (d1, d2, d3):
+            ingesta.procesar(det)
+        mesa.decidir_expediente("EXP-2026-000001", True, "jueza-a")
+        d.despachar_expediente(mesa.expedientes["EXP-2026-000001"].expediente)
+        mesa.decidir_expediente("EXP-2026-000002", True, "jueza-a")            # aprobado, sin despachar
+        auditoria._archivo.close()
+        (ingesta.carpeta / "EXP-2026-000001.json").unlink()                    # se perdió
+        (ingesta.carpeta / "EXP-2026-000002.json").write_text('{"id": "EXP-2026-0000', encoding="utf-8")  # truncado
+        alterado = json.loads((ingesta.carpeta / "EXP-2026-000003.json").read_text(encoding="utf-8"))
+        alterado["objetivo_recomendado"] = "sitio-legitimo.test"               # no verifica su sello
+        (ingesta.carpeta / "EXP-2026-000003.json").write_text(json.dumps(alterado), encoding="utf-8")
+
+        p2 = self._plataforma()
+        resumen = self._reanudar(p2)
+        auditoria2, mesa2, builder2, d2_, _, ingesta2 = p2
+        self.assertEqual((resumen["expedientes"], resumen["reconstruidos"], resumen["ordenes"]), (3, 3, 2))
+        self.assertEqual(sorted(mesa2.expedientes), ["EXP-2026-000001", "EXP-2026-000002", "EXP-2026-000003"])
+        self.assertEqual(mesa2.expedientes["EXP-2026-000001"].estado, "despachado")
+        # Lo aprobado sin despachar vuelve al juez: no se firma sobre un expediente reconstruido.
+        self.assertEqual(mesa2.expedientes["EXP-2026-000002"].estado, "pendiente")
+        self.assertEqual(mesa2.expedientes["EXP-2026-000003"].expediente.objetivo_recomendado, "solo.pirata.test")
+        for exp_id in mesa2.expedientes:
+            exportado = json.loads((ingesta2.carpeta / f"{exp_id}.json").read_text(encoding="utf-8"))
+            self.assertTrue(evidencia.verificar_expediente(exportado))
+        # Sin duplicados: las re-detecciones caen en el expediente original y los ids nuevos siguen la numeración.
+        ingesta2.procesar(deteccion("D-9"))
+        self.assertEqual(len(mesa2.expedientes), 3)
+        d2_.despachar_expediente(mesa2.expedientes["EXP-2026-000001"].expediente)
+        self.assertEqual(len(self.sim.recibidas), 2)
+        self.assertEqual(builder2._contador, 3)
+        self.assertTrue(verificar_cadena(auditoria2.ruta))
+        auditoria2._archivo.close()
+
+        # Un segundo reinicio ya encuentra los archivos sanos y repite el mismo estado.
+        p3 = self._plataforma()
+        resumen3 = self._reanudar(p3)
+        self.assertEqual((resumen3["expedientes"], resumen3["reconstruidos"], resumen3["pendientes"]), (3, 0, 2))
+        p3[0]._archivo.close()
+
+    def test_expediente_irrecuperable_no_reutiliza_su_numero(self):
+        self.auditoria._archivo.close()
+        auditoria, mesa, builder, d, gestor, ingesta = self._plataforma()
+        ingesta.procesar(deteccion("D-1"))
+        auditoria._archivo.close()
+        (ingesta.carpeta / "EXP-2026-000001.json").unlink()                    # y el simulador ya no ofrece D-1
+
+        p2 = self._plataforma()
+        resumen = self._reanudar(p2)
+        auditoria2, mesa2, builder2, _, _, ingesta2 = p2
+        self.assertEqual(resumen["expedientes"], 0)
+        self.assertIn("expediente_no_recuperado", auditoria2.ruta.read_text(encoding="utf-8"))
+        ingesta2.procesar(deteccion("D-2"))                                     # re-detección del mismo servidor
+        self.assertEqual(list(mesa2.expedientes), ["EXP-2026-000002"])
+        auditoria2._archivo.close()
+
+    def test_exportacion_atomica_no_deja_temporales(self):
+        self.auditoria._archivo.close()
+        auditoria, mesa, builder, d, gestor, ingesta = self._plataforma()
+        ingesta.procesar(deteccion("D-1"))
+        self.assertEqual([a.name for a in ingesta.carpeta.iterdir()], ["EXP-2026-000001.json"])
+        auditoria._archivo.close()
 
     def test_log_vacio_es_arranque_normal(self):
         self.auditoria._archivo.close()

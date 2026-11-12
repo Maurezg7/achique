@@ -36,10 +36,41 @@ async function refrescar() {
     }
   } catch (e) { /* el servidor puede estar reiniciando: reintenta */ }
 }
+// Antes de aprobar, el juez confirma: puede arrepentirse y no se firma ni se envía nada.
+const dlg = document.getElementById('confirmar');
+function confirmar(d) {
+  return new Promise(resolver => {
+    const esReclamo = d.confirmar === 'reclamo';
+    dlg.querySelector('h4').textContent = esReclamo ? '¿Seguro que querés aprobar esta resolución?' : '¿Seguro que querés bloquear?';
+    const det = dlg.querySelector('#conf-detalle'); det.textContent = '';
+    const fila = (k, v) => { const p = document.createElement('p'), b = document.createElement('b');
+      b.textContent = k; p.append(b, ' ' + v); det.append(p); };
+    if (esReclamo) { fila('Reclamo', d.id + ' · ' + d.dominio); fila('Propuesta', d.propuesta); }
+    else {
+      fila('Se bloquea', (d.tipo === 'ip' ? 'la IP ' : 'el dominio ') + d.objetivo);
+      fila('Servidor', d.host); fila('Vence', 'minuto ' + d.vence); fila('Expediente', d.id);
+      if (d.riesgo) fila('Ojo', 'la IP es compartida con sitios legítimos; por eso la orden es solo por dominio.');
+    }
+    dlg.querySelector('#conf-nota').textContent = esReclamo
+      ? 'Al confirmar, la plataforma ejecuta la propuesta con tu firma. Si dudás, volvé: no se hace nada.'
+      : 'Al confirmar, la orden se firma con tu clave y sale a todos los proveedores. Si dudás, volvé: no se firma ni se envía nada.';
+    const si = dlg.querySelector('.si'), no = dlg.querySelector('.volver');
+    si.textContent = esReclamo ? 'Sí, aprobar' : 'Sí, bloquear y firmar';
+    let ok = false;
+    si.onclick = () => { ok = true; dlg.close(); };
+    no.onclick = () => dlg.close();
+    dlg.onclose = () => resolver(ok);
+    dlg.showModal(); no.focus();
+  });
+}
 document.addEventListener('submit', async ev => {
   ev.preventDefault();
   const boton = ev.submitter, form = ev.target, datos = new URLSearchParams();
   if (boton && boton.name) datos.append(boton.name, boton.value);
+  if (boton && boton.value === 'aprobar' && form.dataset.confirmar) {
+    if (!await confirmar(form.dataset)) { avisar('No se firmó nada: sigue pendiente.'); return; }
+    datos.append('confirmado', 'si');
+  }
   if (boton && boton.value === 'rechazar') {
     const motivo = prompt('Motivo del rechazo (queda en la auditoría):', '');
     if (motivo === null) return;
@@ -51,7 +82,7 @@ document.addEventListener('submit', async ev => {
     const r = await fetch(form.action, {method: 'POST', body: datos, headers: {'X-Requested-With': 'fetch'}});
     if (form.action.endsWith('/logout')) { location.href = '/login?salio=1'; return; }
     if (r.status === 401) { location.href = '/login'; return; }
-    if (r.status === 403) avisar(await r.text());
+    if (r.status === 403 || r.status === 400) avisar(await r.text());
   }
   finally { ocupado = false; ultimo = ''; refrescar(); }
 });
@@ -91,7 +122,7 @@ const PASOS = [
   {sel: 'main .card:not(.reclamo) .alerta, main .card:not(.reclamo) .limpio', t: 'Riesgo de daño colateral', d: 'Si la IP también sirve a otros sitios, la plataforma lo marca en rojo y propone bloquear solo el dominio.'},
   {sel: 'main .card:not(.reclamo) .pedido', t: 'Orden propuesta', d: 'Qué se va a bloquear (IP o dominio) y hasta cuándo. Vence sola al terminar el partido.'},
   {sel: 'main .card:not(.reclamo) .asis', t: 'Explicación del asistente', d: 'Abrila para leer en criollo por qué se propone IP o dominio y qué conviene revisar antes de firmar.'},
-  {sel: 'main .card:not(.reclamo) .btn.aprobar', t: 'Aprobar y firmar', d: 'Con un clic firmás con tu clave de turno y la orden sale a cada proveedor en el tipo de bloqueo que acepta. "Rechazar" pide un motivo.'},
+  {sel: 'main .card:not(.reclamo) .btn.aprobar', t: 'Aprobar y firmar', d: 'Antes de firmar te pregunta si estás seguro: podés volver atrás y no pasa nada. Al confirmar, firmás con tu clave de turno y la orden sale a cada proveedor. "Rechazar" pide un motivo.'},
   {sel: '.card.reclamo', t: 'Reclamos', d: 'Si un sitio legítimo quedó bloqueado, aparece acá con la propuesta de la plataforma (levantar y precisar). Vos decidís.', falta: 'No hay reclamos ahora: aparecen acá cuando algún sitio reclame.'},
   {sel: 'aside section:not(#asistente) .lista', t: 'Órdenes en proveedores', d: 'El estado de cada bloqueo por proveedor (aplicada, fallida, vencida…) y el porcentaje de clientes cubiertos.'},
   {sel: '.pub', t: 'Registro público', d: 'Vista de transparencia: qué se bloqueó, cuándo, por orden de quién y hasta cuándo, sin evidencia interna.'},

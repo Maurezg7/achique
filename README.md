@@ -17,7 +17,9 @@ Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entr
 2. **Ingresar a la Mesa del juez** (`http://localhost:8090`) con un usuario de demostración (ver
    [Ingreso de los jueces](#ingreso-de-los-jueces)). La primera vez se abre una **guía de 13 pasos** (botón 🧭
    para volver a verla) que recorre marcador, expedientes, riesgo colateral, firma, reclamos, órdenes y registro público.
-3. **Aprobar los expedientes** con *Aprobar y firmar*. El **Asistente del juez** (panel derecho) marca el siguiente
+3. **Aprobar los expedientes** con *Aprobar y firmar*. Antes de firmar, la Mesa pregunta **"¿Seguro que querés
+   bloquear?"** con el objetivo, el servidor y el vencimiento: *No, volver* deja el expediente pendiente y no se
+   firma ni se envía nada. El **Asistente del juez** (panel derecho) marca el siguiente
    paso, avisa demoras, órdenes fallidas o rechazadas y bloqueos por IP cerca del final, y explica cada expediente
    en lenguaje claro. Es local y por reglas: **recomienda, nunca aprueba ni firma**.
 4. **Verificar** al terminar: `evaluacion/verificar.py` (métricas oficiales) y la cadena de auditoría.
@@ -78,6 +80,11 @@ python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --
 
 - **Mesa del juez:** <http://localhost:8090> — ingresar con usuario y contraseña y aprobar o rechazar cada
   expediente (nadie aprueba solo).
+- **Confirmación antes de bloquear:** *Aprobar y firmar* abre un cuadro "¿Seguro que querés bloquear?" con qué se
+  bloquea (IP o dominio), el servidor, el vencimiento y el aviso de IP compartida si corresponde. Con *No, volver*
+  (o `Esc`) el juez se arrepiente a tiempo: el expediente sigue pendiente, no queda decisión, no se firma y no sale
+  ninguna orden. Recién con *Sí, bloquear y firmar* se registra la decisión. Lo mismo al aprobar la resolución de
+  un reclamo. El servidor también lo exige: una aprobación sin confirmación se rechaza (HTTP 400).
 - **Registro público:** <http://localhost:8090/transparencia> (y `/transparencia.json`).
 - Cada expediente se exporta a `salida/expedientes/EXP-….json`.
 - El marcador muestra por defecto **Azul Juniors vs Rojo Plate** por la ficticia **LFA · Liga de Fútbol Argentino**
@@ -98,6 +105,9 @@ python3 -m achique.evidencia ../desafio-futbol/salida/expedientes/EXP-2026-00000
 **Si la plataforma se reinicia a mitad del partido**, volvé a correr el mismo comando con el mismo `--log`: retoma
 desde la auditoría y los expedientes exportados (sin duplicar expedientes ni órdenes, con los pendientes otra vez en
 la Mesa y siguiendo las órdenes ya enviadas). Los jueces vuelven a ingresar. Queda registrado como `plataforma_reanudada`.
+Si un expediente exportado falta, quedó cortado o no verifica su sello, se **reconstruye desde la detección original**
+con el mismo número (`expediente_reconstruido`); si ya estaba aprobado pero no despachado, vuelve a la Mesa para
+que un juez lo decida de nuevo.
 
 **Entregables del partido final** (expediente, auditoría y evaluación) en un paso, desde `mi_solucion-futbol/`:
 
@@ -190,7 +200,7 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 | `auditoria.py` | JSONL append-only encadenado por SHA-256; `verificar_cadena()` detecta cualquier edición o borrado. |
 | `asistente.py` | Asistente del juez local y por reglas (sin API ni red): vigila demoras de firma, órdenes rechazadas / fallidas / sin confirmar, bloqueos por IP cerca del final, turno y cadena de auditoría; explica cada expediente y reclamo en lenguaje claro y marca el siguiente paso. Sus alertas quedan en la auditoría (`asistente_alerta`). **Recomienda, nunca aprueba ni firma.** También en `/asistente.json`. |
 | `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. Incluye una guía interactiva de 13 pasos (botón 🧭) y "Mostrame dónde", que resalta el elemento a revisar. La página, estilos, script y logos están en `web/`. |
-| `reanudacion.py` | Si se arranca con un `--log` que ya tiene eventos, reconstruye el estado: detecciones ya procesadas, expedientes (desde `salida/expedientes/`), decisiones, órdenes enviadas y su último estado. No duplica expedientes ni órdenes; completa lo que quedó a medio despachar. |
+| `reanudacion.py` | Si se arranca con un `--log` que ya tiene eventos, reconstruye el estado: detecciones ya procesadas, expedientes (desde `salida/expedientes/`, verificando su sello), decisiones, órdenes enviadas y su último estado. No duplica expedientes ni órdenes; completa lo que quedó a medio despachar. Un expediente faltante, cortado o alterado se reconstruye desde la detección original conservando su número, y los expedientes se exportan de forma atómica. |
 | `entrega.py` | `python3 -m achique.entrega …`: copia a `entrega/` la auditoría, un expediente por dominio y uno por IP (verificando sellos y cadena) y la salida de `verificar.py`. |
 | `plataforma.py` | Punto de entrada: hilos de ingesta, despacho, reclamos y servidor HTTP. |
 
@@ -198,6 +208,9 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 
 - **El juez siempre decide.** `servidor_juez.py` solo escribe una decisión en `Mesa`; `despacho.py` firma
   únicamente lo aprobado. Sin juez de turno no se puede decidir ni firmar. La clave nunca pasa por HTTP.
+- **Dos pasos para bloquear.** Aprobar exige una confirmación explícita ("¿Seguro que querés bloquear?"), en la
+  pantalla y en el servidor. Un clic por error no bloquea a nadie: hasta que el juez confirma no hay decisión,
+  firma ni orden. Rechazar pide un motivo (y se puede cancelar).
 - **IP o dominio, con criterio.** Se bloquea la IP cuando solo sirve al sitio pirata (incluidos sus
   espejos: `s1` y `s1-respaldo.pelotaya.test` comparten dominio base, y bloquear la IP corta a ambos). Si
   la IP sirve **otro** sitio, si el ASN es CDN / hosting compartido, o si no hay datos de DNS pasivo, se

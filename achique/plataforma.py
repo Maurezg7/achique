@@ -23,7 +23,7 @@ from .firmas import RegistroJueces
 from .mesa import Mesa
 from .reclamos import GestorReclamos, hilo_reclamos
 from .servidor_juez import iniciar_servidor_juez
-from .reanudacion import reanudar
+from .reanudacion import exportar_expediente, reanudar
 from .sesiones import USUARIOS_DEMO, Usuarios
 
 
@@ -59,8 +59,7 @@ class Ingesta:
         exp = self.builder.construir(deteccion)
         self.mesa.nuevo_expediente(exp)
         self.gestor.registrar_host_pirata(exp.host_stream)
-        (self.carpeta / f"{exp.id}.json").write_text(json.dumps(exp.to_dict(), ensure_ascii=False, indent=2),
-                                                     encoding="utf-8")
+        exportar_expediente(self.carpeta, exp)
         self.auditoria.registrar("expediente_creado", expediente_id=exp.id, hash_expediente=exp.hash_expediente,
                                  hash_captura=exp.hash_captura, tipo_recomendado=exp.tipo_recomendado,
                                  objetivo_recomendado=exp.objetivo_recomendado, riesgo_colateral=exp.riesgo_colateral,
@@ -106,6 +105,9 @@ def main() -> None:
     if recuperado:
         print(f"Reanudación: {recuperado['expedientes']} expediente(s) ({recuperado['pendientes']} pendiente(s)), "
               f"{recuperado['ordenes']} orden(es) y {recuperado['detecciones_vistas']} detección(es) ya procesadas.")
+        if recuperado["reconstruidos"]:
+            print(f"  {recuperado['reconstruidos']} expediente(s) reconstruido(s) desde la detección original "
+                  "(faltaba el archivo exportado o no verificaba su sello).")
 
     detener = threading.Event()
     hilos = [

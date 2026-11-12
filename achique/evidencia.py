@@ -161,8 +161,12 @@ class ExpedienteBuilder:
             return dns, otros, True, f"El ASN es infraestructura compartida ({dns.get('organizacion')})"
         return dns, otros, False, "La IP solo sirve dominios del mismo sitio pirata"
 
-    def construir(self, deteccion: dict) -> Optional[Expediente]:
-        """Arma el expediente de una detección, o devuelve None si no es señal pirata."""
+    def construir(self, deteccion: dict, exp_id: Optional[str] = None) -> Optional[Expediente]:
+        """Arma el expediente de una detección, o devuelve None si no es señal pirata.
+
+        `exp_id` solo se usa al reanudar, para reconstruir con su número original un expediente
+        cuyo archivo exportado se perdió.
+        """
         if self.motivo_descarte(deteccion):
             return None
         marca = deteccion["marca_de_agua_extraida"]
@@ -183,9 +187,11 @@ class ExpedienteBuilder:
         if dns.get("asn") is not None and dns.get("asn") != asn:
             verificaciones.append(f"ATENCIÓN: el ASN del DNS pasivo ({dns.get('asn')}) difiere del detectado ({asn})")
 
-        self._contador += 1
+        if exp_id is None:
+            self._contador += 1
+            exp_id = f"EXP-2026-{self._contador:06d}"
         exp = Expediente(
-            id=f"EXP-2026-{self._contador:06d}",
+            id=exp_id,
             deteccion_id=deteccion["id"],
             minuto_deteccion=deteccion["minuto"],
             host_stream=host,

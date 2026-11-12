@@ -5,14 +5,19 @@ de cero: no vuelve a abrir expedientes por detecciones ya procesadas, muestra ot
 al juez de turno, recuerda qué órdenes ya se enviaron (para no duplicarlas) y sigue su confirmación y
 vencimiento. La cadena de auditoría continúa donde quedó. Las sesiones no se guardan: los jueces
 vuelven a ingresar.
+
+Si el archivo exportado de un expediente falta, quedó a medio escribir o no verifica su sello, el
+expediente se reconstruye con su mismo número desde la detección original del simulador. Queda
+auditado y, si estaba aprobado pero sin despachar del todo, vuelve a la Mesa para una nueva decisión.
 """
 import json
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .despacho import EstadoOrden
-from .evidencia import Expediente
+from .evidencia import Expediente, pedir, verificar_expediente
 
 FINALES_SIN_ORDEN_VIVA = ("fallida", "reemplazada")
 
@@ -26,6 +31,31 @@ def leer_eventos(ruta: Path) -> List[Tuple[str, dict]]:
             entrada = json.loads(linea)
             eventos.append((entrada["evento"], entrada.get("datos", {})))
     return eventos
+
+
+def exportar_expediente(carpeta: Path, exp: Expediente) -> None:
+    """Escribe el expediente de forma atómica: un corte a mitad de la escritura no deja un JSON truncado."""
+    destino = carpeta / f"{exp.id}.json"
+    temporal = destino.with_suffix(".json.tmp")
+    temporal.write_text(json.dumps(exp.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporal, destino)
+
+
+def _leer_expediente(archivo: Path) -> Optional[Expediente]:
+    try:
+        datos = json.loads(archivo.read_text(encoding="utf-8"))
+        return Expediente(**datos) if verificar_expediente(datos) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _reconstruir(exp_id: str, deteccion_id: str, ingesta, builder) -> Optional[Expediente]:
+    try:
+        detecciones = pedir(ingesta.base, "/detecciones?desde=-1")["detecciones"]
+        original = next((d for d in detecciones if d["id"] == deteccion_id), None)
+        return builder.construir(original, exp_id) if original else None
+    except Exception:
+        return None
 
 
 def reanudar(ruta_log: Path, carpeta_expedientes: Path, mesa, builder, ingesta, despachador, gestor,
@@ -42,19 +72,30 @@ def reanudar(ruta_log: Path, carpeta_expedientes: Path, mesa, builder, ingesta, 
 
     # 2. Expedientes exportados, en el orden en que se crearon.
     expedientes: Dict[str, Expediente] = {}
+    reconstruidos = set()
     for ev, d in eventos:
-        if ev != "expediente_creado":
+        if ev != "expediente_creado" or d["expediente_id"] in expedientes:
             continue
-        archivo = carpeta_expedientes / f"{d['expediente_id']}.json"
-        if not archivo.exists():
-            continue
-        exp = Expediente(**json.loads(archivo.read_text(encoding="utf-8")))
+        exp_id = d["expediente_id"]
+        # El número se reserva aunque el expediente no se recupere: un id nunca se reutiliza.
+        numero = re.search(r"(\d+)$", exp_id)
+        if numero:
+            builder._contador = max(builder._contador, int(numero.group(1)))
+        exp = _leer_expediente(carpeta_expedientes / f"{exp_id}.json")
+        if exp is None or exp.id != exp_id:
+            exp = _reconstruir(exp_id, d.get("deteccion_id", ""), ingesta, builder)
+            if exp is None:
+                auditoria.registrar("expediente_no_recuperado", expediente_id=exp_id,
+                                    deteccion_id=d.get("deteccion_id"), hash_original=d.get("hash_expediente"))
+                continue
+            exportar_expediente(carpeta_expedientes, exp)
+            reconstruidos.add(exp_id)
+            auditoria.registrar("expediente_reconstruido", expediente_id=exp_id, deteccion_id=exp.deteccion_id,
+                                hash_original=d.get("hash_expediente"), hash_expediente=exp.hash_expediente,
+                                motivo="el archivo exportado faltaba o no verificaba su sello")
         expedientes[exp.id] = exp
         mesa.nuevo_expediente(exp)
         gestor.registrar_host_pirata(exp.host_stream)
-        numero = re.search(r"(\d+)$", exp.id)
-        if numero:
-            builder._contador = max(builder._contador, int(numero.group(1)))
     for ev, d in eventos:
         if ev == "deteccion_reiterada" and d.get("expediente_id") in expedientes:
             mesa.agregar_deteccion(d["expediente_id"], {"id": d["deteccion_id"], "minuto": d["minuto"]},
@@ -131,6 +172,10 @@ def reanudar(ruta_log: Path, carpeta_expedientes: Path, mesa, builder, ingesta, 
                              if ev == "proveedor_sin_capacidad" and d.get("expediente_id") == exp_id}
             if proveedores <= con_orden | sin_capacidad:
                 decision.estado = "despachado"
+    # Lo aprobado sobre un expediente que hubo que reconstruir no se firma sin que el juez lo vuelva a ver.
+    for exp_id in sorted(reconstruidos):
+        if mesa.expedientes[exp_id].estado == "aprobado":
+            mesa.devolver_a_pendiente(exp_id, "expediente reconstruido tras el reinicio: requiere nueva decisión")
 
     # 6. Reclamos ya resueltos no se vuelven a proponer; los demás se releen del simulador.
     for ev, d in eventos:
@@ -138,6 +183,7 @@ def reanudar(ruta_log: Path, carpeta_expedientes: Path, mesa, builder, ingesta, 
             gestor._vistos.add(d["reclamo_id"])
 
     resumen = {"expedientes": len(expedientes), "pendientes": len(mesa.pendientes_expedientes()),
-               "ordenes": len(ordenes), "detecciones_vistas": len(ingesta._vistos)}
+               "ordenes": len(ordenes), "detecciones_vistas": len(ingesta._vistos),
+               "reconstruidos": len(reconstruidos)}
     auditoria.registrar("plataforma_reanudada", **resumen)
     return resumen

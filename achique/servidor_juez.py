@@ -225,6 +225,10 @@ class JuezHandler(BaseHTTPRequestHandler):
                 return self._responder("No estás de turno: no podés decidir ni firmar.", 403,
                                        "text/plain; charset=utf-8")
             aprobar = cuerpo.get("decision", [""])[0] == "aprobar"
+            if aprobar and cuerpo.get("confirmado", [""])[0] != "si":
+                # Aprobar exige la confirmación explícita del juez ("¿Seguro que querés bloquear?").
+                return self._responder("Falta tu confirmación: no se aprobó ni se firmó nada.", 400,
+                                       "text/plain; charset=utf-8")
             if partes[0] == "expedientes":
                 self.mesa.decidir_expediente(partes[1], aprobar, juez_id, cuerpo.get("motivo", [""])[0], minuto)
             else:
@@ -535,7 +539,9 @@ class JuezHandler(BaseHTTPRequestHandler):
    <dt>Promoción</dt><dd class="promos">{promo}</dd>
   </dl>
  </details>
- <form method="post" action="/expedientes/{_escape(e.id)}/decidir">
+ <form method="post" action="/expedientes/{_escape(e.id)}/decidir" data-confirmar="bloqueo" data-id="{_escape(e.id)}"
+       data-host="{_escape(e.host_stream)}" data-tipo="{_escape(e.tipo_recomendado)}" data-objetivo="{_escape(e.objetivo_recomendado)}"
+       data-vence="{e.vencimiento_propuesto}" data-riesgo="{'1' if e.riesgo_colateral else ''}">
   <button class="btn aprobar" name="decision" value="aprobar">✓ Aprobar y firmar</button>
   <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
  </form>
@@ -555,7 +561,8 @@ class JuezHandler(BaseHTTPRequestHandler):
  <div class="pedido"><small>Propuesta de la plataforma</small><div><span class="tipo">{_escape(d.propuesta.replace('_', ' '))}</span></div>
  <p class="razon">{_escape(d.razon)}</p></div>
  {self._explicacion(r['id'], self.asistente.explicar_reclamo(d))}
- <form method="post" action="/reclamos/{_escape(r['id'])}/decidir">
+ <form method="post" action="/reclamos/{_escape(r['id'])}/decidir" data-confirmar="reclamo" data-id="{_escape(r['id'])}"
+       data-dominio="{_escape(r['dominio'])}" data-propuesta="{_escape(d.propuesta.replace('_', ' '))}">
   <button class="btn aprobar" name="decision" value="aprobar">✓ Aprobar propuesta</button>
   <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
  </form>
