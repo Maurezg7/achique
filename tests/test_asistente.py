@@ -79,7 +79,10 @@ class TestAsistente(ConSimulador):
     def test_bloqueos_por_ip_al_final_del_partido(self):
         g = grupo("EXP-1", {"grande": ("aplicada", "ip")}, aplicada_min=10)
         self.assertEqual(self._claves(self.asis.evaluar(est(minuto=98), [], [], [g]))["ip-fin"], "info")
-        self.assertEqual(self._claves(self.asis.evaluar(est(minuto=106, finalizado=True), [], [], [g]))["ip-post-partido"],
+        recien = self._claves(self.asis.evaluar(est(minuto=105.01, finalizado=True), [], [], [g]))
+        self.assertNotIn("ip-post-partido", recien)
+        self.assertEqual(recien["ip-fin"], "info")
+        self.assertEqual(self._claves(self.asis.evaluar(est(minuto=107.5, finalizado=True), [], [], [g]))["ip-post-partido"],
                          "critico")
         vencida = grupo("EXP-1", {"grande": ("vencida", "ip")})
         self.assertNotIn("ip-post-partido", self._claves(self.asis.evaluar(est(minuto=106, finalizado=True), [], [], [vencida])))
