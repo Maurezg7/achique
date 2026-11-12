@@ -32,6 +32,13 @@ Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entr
 | Transparencia | `/transparencia` y `/transparencia.json` |
 | Pitch | `entrega/presentacion.pptx`, `entrega/guion_pitch.md`, `entrega/guion_video.md` |
 
+## Qué agrega frente a otros países
+
+El desafío compara modelos de Italia, Francia, Reino Unido, Grecia, Perú y México: ninguno hace que cada pedido llegue en
+el momento a un juez de turno. Achique lo hace sin perder velocidad (primer bloqueo en 1 o 2 minutos) y evita el problema
+de Piracy Shield (Italia), que bloqueó sitios legítimos: si la IP es compartida, se pide el dominio. Detalle en
+[`entrega/propuesta_normativa.md`](entrega/propuesta_normativa.md).
+
 ## Resultado en el partido de práctica
 
 `evaluacion/verificar.py` sobre una corrida completa (`--acelerar 30`, juez aprobando a mano). Salida
