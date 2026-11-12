@@ -9,6 +9,28 @@ encadenada por hashes** y en un **registro público de transparencia**.
 
 Python 3.9+ y **solo biblioteca estándar**. Corre contra el simulador oficial; no bloquea nada real.
 
+## Para los jueces (5 minutos)
+
+Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entrega/achique_logo.svg)).
+
+1. **Correr** (Python 3.9+, sin instalar nada): simulador oficial + plataforma, ver [Cómo correrla](#cómo-correrla).
+2. **Abrir la Mesa del juez** (`http://localhost:8090`). La primera vez se abre una **guía de 13 pasos** (botón 🧭
+   para volver a verla) que recorre marcador, expedientes, riesgo colateral, firma, reclamos, órdenes y registro público.
+3. **Aprobar los expedientes** con *Aprobar y firmar*. El **Asistente del juez** (panel derecho) marca el siguiente
+   paso, avisa demoras, órdenes fallidas o rechazadas y bloqueos por IP cerca del final, y explica cada expediente
+   en lenguaje claro. Es local y por reglas: **recomienda, nunca aprueba ni firma**.
+4. **Verificar** al terminar: `evaluacion/verificar.py` (métricas oficiales) y la cadena de auditoría.
+
+| Criterio | Dónde mirarlo |
+|---|---|
+| Circuito completo | detección → expediente → juez de turno → proveedores → confirmación → vencimiento ([Arquitectura](#arquitectura)) |
+| Daño colateral | IP compartida o CDN ⇒ se pide el **dominio**; tarjeta "Riesgo de daño colateral" y explicación del asistente |
+| Evidencia verificable | `entrega/expediente_ejemplo*.json`, `python3 -m tarjeta_roja.evidencia` |
+| Firma humana y de turno | `firmas.py` resuelve el juez de turno al firmar; sin auto-aprobación |
+| Auditoría | `python3 -m tarjeta_roja.auditoria entrega/auditoria_ejemplo.jsonl` → *Cadena íntegra: SÍ* |
+| Transparencia | `/transparencia` y `/transparencia.json` |
+| Pitch | `entrega/presentacion.pptx`, `entrega/guion_pitch.md`, `entrega/guion_video.md` |
+
 ## Resultado en el partido de práctica
 
 `evaluacion/verificar.py` sobre una corrida completa (`--acelerar 30`, juez aprobando a mano). Salida
@@ -149,7 +171,7 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 Todo el código de este repositorio se escribió durante el hackathon, a partir del 11 de noviembre de 2026
 (ver el historial de git). No se reutilizó código propio previo ni se usaron librerías externas: solo la
 biblioteca estándar de Python 3.9+. El simulador, los datos y `evaluacion/verificar.py` son del repositorio
-oficial `desafio-futbol` y no están copiados acá. Usamos un asistente de código con IA (Devin) durante el desarrollo.
+oficial `desafio-futbol` y no están copiados acá.
 
 ## Entregables (`entrega/`)
 

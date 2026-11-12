@@ -1,4 +1,4 @@
-# AGENTS.md — guía para agentes de código (Devin y otros)
+# AGENTS.md — guía para agentes de código
 
 Plataforma de bloqueo de streaming pirata para el **Desafío Fútbol** (hackathon). Corre contra un
 **simulador** oficial; no bloquea nada real. Lo que se evalúa es lo que esté en el repo al cierre.
