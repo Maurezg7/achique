@@ -68,6 +68,8 @@ class TestAsistente(ConSimulador):
         g = grupo("EXP-1", {"grande": ("rechazada", "ip"), "chico": ("fallida", "dominio")})
         g2 = grupo("EXP-2", {"grande": ("aplicada", "ip"), "chico": ("recibida", "dominio")}, aplicada_min=10)
         claves = self._claves(self.asis.evaluar(est(minuto=12), [], [], [g, g2]))
+        self.assertNotIn("sin-confirmar-EXP-2-chico", claves)
+        claves = self._claves(self.asis.evaluar(est(minuto=17.5), [], [], [g, g2]))
         self.assertEqual(claves["rechazada-EXP-1-grande"], "critico")
         self.assertEqual(claves["fallida-EXP-1-chico"], "atencion")
         self.assertEqual(claves["sin-confirmar-EXP-2-chico"], "atencion")
