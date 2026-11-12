@@ -5,6 +5,7 @@
                   que el juez de turno apruebe o rechace, y los reclamos con la propuesta de la plataforma.
 - `/transparencia` Registro público de solo lectura: qué se bloqueó, cuándo, por orden de quién y hasta
                   cuándo. Sin evidencia interna. También en JSON: `/transparencia.json`.
+- `/asistente.json` Estado del asistente del juez (alertas y siguiente paso), ver `asistente.py`.
 - `/static/…`     Página base, estilos, script y logos de `web/`.
 
 Las decisiones se cargan en la Mesa; el hilo de despacho (despacho.py) recién firma y envía cuando ve
@@ -12,11 +13,13 @@ una decisión "aprobada". El juez nunca ve ni toca la clave de firma.
 """
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .asistente import Asistente
 from .auditoria import verificar_cadena
 from .evidencia import pedir
 from . import LEMA, NOMBRE
@@ -73,6 +76,7 @@ class JuezHandler(BaseHTTPRequestHandler):
     nombres_jueces: Dict[str, str] = {}
     local, visitante = "Azul Juniors", "Rojo Plate"
     turnos: List[dict] = []
+    asistente: Asistente = Asistente()
 
     def log_message(self, formato, *args):
         pass
@@ -109,6 +113,9 @@ class JuezHandler(BaseHTTPRequestHandler):
                                    .replace("__FRAG__", "/transparencia/fragmento"))
         if partes == ["transparencia", "fragmento"]:
             return self._responder(self._fragmento_transparencia())
+        if partes == ["asistente.json"]:
+            return self._responder(json.dumps(self._evaluar_asistente(), ensure_ascii=False, indent=2),
+                                   tipo="application/json; charset=utf-8")
         if partes == ["transparencia.json"]:
             return self._responder(json.dumps(self.mesa.vista_transparencia(), ensure_ascii=False, indent=2),
                                    tipo="application/json; charset=utf-8")
@@ -138,16 +145,18 @@ class JuezHandler(BaseHTTPRequestHandler):
         except Exception:
             return None, None
 
-    def _estado_simulador(self) -> dict:
+    @classmethod
+    def _estado_simulador(cls) -> dict:
         try:
-            estado = pedir(self.base_simulador, "/estado")
+            estado = pedir(cls.base_simulador, "/estado")
             return {"minuto": float(estado["minuto_actual"]), "fin": float(estado.get("fin_min", 105)),
                     "turno": estado["jueces_de_turno"], "finalizado": bool(estado.get("finalizado"))}
         except Exception:
             return {"minuto": 0.0, "fin": 105.0, "turno": [], "finalizado": False}
 
-    def _nombre_juez(self, juez_id: Optional[str]) -> str:
-        return self.nombres_jueces.get(juez_id or "", juez_id or "—")
+    @classmethod
+    def _nombre_juez(cls, juez_id: Optional[str]) -> str:
+        return cls.nombres_jueces.get(juez_id or "", juez_id or "—")
 
     # --- datos derivados -------------------------------------------------------------------
 
@@ -186,11 +195,13 @@ class JuezHandler(BaseHTTPRequestHandler):
         return " ".join(f"<span class='tipo t-{_escape(t)}'>{_escape(t)}</span> <code>{_escape(obj)}</code>"
                         for t, obj in g["objetivos"])
 
-    def _clientes(self) -> Dict[str, int]:
-        return {p["id"]: p.get("clientes", 0) for p in self.proveedores}
+    @classmethod
+    def _clientes(cls) -> Dict[str, int]:
+        return {p["id"]: p.get("clientes", 0) for p in cls.proveedores}
 
-    def _cobertura(self, grupo: dict) -> float:
-        clientes = self._clientes()
+    @classmethod
+    def _cobertura(cls, grupo: dict) -> float:
+        clientes = cls._clientes()
         total = sum(clientes.values()) or 1
         return 100.0 * sum(clientes.get(p, 0) for p, (e, _) in grupo["proveedores"].items() if e == "aplicada") / total
 
@@ -261,12 +272,23 @@ class JuezHandler(BaseHTTPRequestHandler):
 
     # --- mesa del juez ---------------------------------------------------------------------
 
+    @classmethod
+    def _instantanea(cls) -> tuple:
+        """Copia consistente (bajo el lock de la Mesa) de expedientes, reclamos y órdenes agrupadas."""
+        with cls.mesa.lock:
+            todos = list(cls.mesa.expedientes.values())
+            reclamos = list(cls.mesa.reclamos.values())
+            ordenes = [dict(o, resultado=dict(o["resultado"])) for o in cls.mesa.ordenes_enviadas]
+        return todos, reclamos, cls._agrupar_ordenes(ordenes)
+
+    @classmethod
+    def _evaluar_asistente(cls) -> dict:
+        todos, reclamos, grupos = cls._instantanea()
+        return cls.asistente.evaluar(cls._estado_simulador(), todos, reclamos, grupos, cls._cadena_ok())
+
     def _fragmento(self) -> str:
         est = self._estado_simulador()
-        with self.mesa.lock:
-            todos = list(self.mesa.expedientes.values())
-            reclamos = list(self.mesa.reclamos.values())
-            ordenes = [dict(o, resultado=dict(o["resultado"])) for o in self.mesa.ordenes_enviadas]
+        todos, reclamos, grupos = self._instantanea()
         # Primero los de riesgo colateral: son los que más exigen la mirada del juez.
         pendientes = sorted((d for d in todos if d.estado == "pendiente"),
                             key=lambda d: (not d.expediente.riesgo_colateral, d.expediente.minuto_deteccion))
@@ -274,7 +296,6 @@ class JuezHandler(BaseHTTPRequestHandler):
                            key=lambda d: d.decidido_min or 0, reverse=True)[:8]
         reclamos_pend = [d for d in reclamos if d.estado == "pendiente"]
         reclamos_ok = sum(1 for d in reclamos if d.estado != "pendiente")
-        grupos = self._agrupar_ordenes(ordenes)
         activos = [g for g in grupos if any(e == "aplicada" for e, _ in g["proveedores"].values())]
         minuto_det = {d.expediente.id: d.expediente.minuto_deteccion for d in todos}
         demoras = [g["aplicada_min"] - minuto_det[g["expediente_id"]] for g in grupos
@@ -282,11 +303,13 @@ class JuezHandler(BaseHTTPRequestHandler):
         demora_media = f"{sum(demoras) / len(demoras):.1f}′" if demoras else "—"
         cobertura = (sum(self._cobertura(g) for g in activos) / len(activos)) if activos else 0.0
         cadena_ok = self._cadena_ok()
+        panel_asistente = self._panel_asistente(self.asistente.evaluar(est, todos, reclamos, grupos, cadena_ok))
 
         turno = est["turno"][0] if est["turno"] else None
         derecha = (f"<small>Juez de turno</small><b>{_escape(self._nombre_juez(turno)) if turno else 'Sin turno'}</b>"
                    f"<span class='chain {'ok' if cadena_ok else 'bad'}'>{'🔒 Auditoría íntegra' if cadena_ok else '⚠ Auditoría alterada'}</span>"
-                   "<a class='pub' href='/transparencia' target='_blank'>Registro público ↗</a>")
+                   "<a class='pub' href='/transparencia' target='_blank'>Registro público ↗</a>"
+                   "<button type='button' class='guia-btn' data-guia>🧭 Guía de la mesa</button>")
         seccion_reclamos = ""
         if reclamos_pend:
             seccion_reclamos = (f'<section><h2><span class="dot ambar"></span>Reclamos de terceros '
@@ -326,17 +349,41 @@ class JuezHandler(BaseHTTPRequestHandler):
   <div class="grid">{cards}</div>{mas}</section>
  </main>
  <aside>
+  {panel_asistente}
   <section><h2><span class="dot verde"></span>Órdenes en proveedores</h2><div class="lista">{feed}</div></section>
   <section><h2><span class="dot"></span>Últimas decisiones</h2><div class="lista">{hist}</div></section>
  </aside>
 </div>"""
 
-    def _cadena_ok(self) -> bool:
-        auditoria = getattr(self.mesa, "auditoria", None)
+    @classmethod
+    def _cadena_ok(cls) -> bool:
+        auditoria = getattr(cls.mesa, "auditoria", None)
         try:
             return auditoria is None or verificar_cadena(auditoria.ruta)
         except Exception:
             return False
+
+    @staticmethod
+    def _panel_asistente(estado: dict) -> str:
+        sig = estado["siguiente"]
+        alertas = "".join(
+            f"<div class='alerta-asis n-{_escape(a['nivel'])}' data-k='asis-{_escape(a['clave'])}'>"
+            f"<b>{_escape(a['titulo'])}</b><span>{_escape(a['detalle'])}</span>"
+            + (f"<button type='button' class='ver' data-foco='{_escape(a['foco'])}'>ver</button>" if a["foco"] else "")
+            + "</div>" for a in estado["alertas"][:6])
+        return f"""<section id="asistente" class="asistente"><h2><span class="dot violeta"></span>Asistente del juez</h2>
+  <div class="siguiente"><small>Siguiente paso</small><p>{_escape(sig['texto'])}</p>
+   <button type="button" class="mostrar" data-foco="{_escape(sig['foco'])}">Mostrame dónde</button></div>
+  <div class="lista">{alertas}</div>
+  <p class="nota">Recomienda y vigila; nunca aprueba ni firma.</p></section>"""
+
+    @staticmethod
+    def _explicacion(item_id: str, exp: dict) -> str:
+        puntos = "".join(f"<li>{_escape(p)}</li>" for p in exp["puntos"])
+        revisar = ("<small>Antes de decidir, revisá:</small><ul class='checks'>"
+                   + "".join(f"<li>{_escape(r)}</li>" for r in exp["revisar"]) + "</ul>") if exp["revisar"] else ""
+        return (f"<details class='asis' id='asis-{_escape(item_id)}'><summary>🤖 Asistente: {_escape(exp['resumen'])}</summary>"
+                f"<ul>{puntos}</ul>{revisar}<p class='sugerencia'>{_escape(exp['sugerencia'])}</p></details>")
 
     def _card_expediente(self, d) -> str:
         e = d.expediente
@@ -363,6 +410,7 @@ class JuezHandler(BaseHTTPRequestHandler):
  <div class="pedido"><small>Orden propuesta</small>
    <div><span class="tipo t-{_escape(e.tipo_recomendado)}">{_escape(e.tipo_recomendado)}</span>
    <code>{_escape(e.objetivo_recomendado)}</code><span class="vence">vence min {e.vencimiento_propuesto}</span></div></div>
+ {self._explicacion(e.id, self.asistente.explicar_expediente(e))}
  <details id="det-{_escape(e.id)}"><summary>Ver evidencia completa</summary>
   <ul class="checks">{checks}</ul>
   <dl>
@@ -394,6 +442,7 @@ class JuezHandler(BaseHTTPRequestHandler):
  {afecta}
  <div class="pedido"><small>Propuesta de la plataforma</small><div><span class="tipo">{_escape(d.propuesta.replace('_', ' '))}</span></div>
  <p class="razon">{_escape(d.razon)}</p></div>
+ {self._explicacion(r['id'], self.asistente.explicar_reclamo(d))}
  <form method="post" action="/reclamos/{_escape(r['id'])}/decidir">
   <button class="btn aprobar" name="decision" value="aprobar">✓ Aprobar propuesta</button>
   <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
@@ -452,6 +501,23 @@ def iniciar_servidor_juez(mesa: Mesa, base_simulador: str, puerto: int, despacha
     if despachador is not None:
         JuezHandler.proveedores = despachador.proveedores
         JuezHandler.nombres_jueces = {jid: j.get("nombre", jid) for jid, j in despachador.jueces.jueces.items()}
+    JuezHandler.asistente = Asistente(JuezHandler._clientes(), JuezHandler.nombres_jueces, JuezHandler.turnos,
+                                      getattr(mesa, "auditoria", None))
     servidor = ThreadingHTTPServer(("0.0.0.0", puerto), JuezHandler)
     threading.Thread(target=servidor.serve_forever, daemon=True).start()
+    threading.Thread(target=vigilar_con_asistente, daemon=True).start()
     return servidor
+
+
+def vigilar_con_asistente(intervalo_seg: float = 1.0) -> None:
+    """El asistente vigila aunque nadie tenga la Mesa abierta: audita alertas y avisa las críticas en consola."""
+    avisadas: set = set()
+    while True:
+        try:
+            for a in JuezHandler._evaluar_asistente()["alertas"]:
+                if a["nivel"] == "critico" and a["clave"] not in avisadas:
+                    avisadas.add(a["clave"])
+                    print(f"[asistente] ⚠ {a['titulo']} — {a['detalle']}")
+        except Exception as e:
+            print(f"[asistente] error: {e}")
+        time.sleep(intervalo_seg)
