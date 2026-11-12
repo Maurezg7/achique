@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from evidencia import Expediente
+from .evidencia import Expediente
 
 
 @dataclass

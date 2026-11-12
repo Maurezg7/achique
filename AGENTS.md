@@ -5,7 +5,7 @@ Plataforma de bloqueo de streaming pirata para el **Desafío Fútbol** (hackatho
 
 ## Reglas duras (no negociables)
 - **Python 3.9+ y solo librería estándar.** No agregues dependencias.
-- **Nunca se firma sin aprobación de un juez humano.** Solo `despacho.py` llama a `firmas.py`, y solo
+- **Nunca se firma sin aprobación de un juez humano.** Solo `tarjeta_roja/despacho.py` llama a `firmas.py`, y solo
   sobre decisiones "aprobadas" en `mesa.py`. No agregues auto-aprobación, ni siquiera "para probar".
 - **El juez de turno se resuelve en el instante de firmar** (`RegistroJueces.de_turno_ahora`), nunca se cachea.
 - **La auditoría es una cadena de hashes** (`auditoria.py`). No la edites a mano ni cambies el formato de
@@ -39,7 +39,12 @@ Tests: `python3 -m unittest discover -s tests -v` (simulador falso en memoria, s
 Para matar procesos de prueba usá el PID del puerto (`ss -ltnp`), no `pkill -f "<args>"`: el patrón
 coincide con la propia línea de comandos del shell y la mata.
 
-## Arquitectura (un archivo por responsabilidad)
+## Arquitectura (paquete `tarjeta_roja/`, un módulo por responsabilidad)
+El código vive en `tarjeta_roja/` con imports relativos; `plataforma.py` en la raíz es solo un atajo a
+`tarjeta_roja.plataforma.main` (también `python3 -m tarjeta_roja`). La UI (HTML, CSS, JS y logos SVG) está
+en `tarjeta_roja/web/` y se sirve en `/static/` con lista blanca. Verificaciones por CLI:
+`python3 -m tarjeta_roja.auditoria <log>` y `python3 -m tarjeta_roja.evidencia <expediente.json>`.
+
 | Archivo | Rol |
 |---|---|
 | `evidencia.py` | Arma el `Expediente` (marca de agua, host/IP/ASN, hash de captura, riesgo colateral por DNS pasivo). |
@@ -80,7 +85,7 @@ Verificá cada una contra el código antes de tocarla; algunas pueden ya estar r
    normativa de 1 página (revisar `propuesta_normativa.md`).
 
 ## Definición de terminado
-- `python3 -m py_compile *.py` limpio y tests en verde.
+- `python3 -m compileall -q tarjeta_roja plataforma.py tests` limpio y tests en verde.
 - Corrida completa contra el simulador sin excepciones en consola; `verificar_cadena()` en `True`.
 - `evaluacion/verificar.py`: sin falsos positivos, sin daño colateral, sin órdenes fuera de turno.
 - Documentá en el PR qué cambiaste y cómo lo probaste; no toques firmas ni auditoría sin avisar.
