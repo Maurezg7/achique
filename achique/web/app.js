@@ -22,7 +22,9 @@ function revisarNuevos() {
 async function refrescar() {
   if (ocupado) return;
   try {
-    const html = await (await fetch(FRAG, {cache: 'no-store'})).text();
+    const r = await fetch(FRAG, {cache: 'no-store'});
+    if (r.status === 401) { location.href = '/login'; return; }
+    const html = await r.text();
     if (html !== ultimo) {
       const abiertos = [...document.querySelectorAll('details[open]')].map(d => d.id), y = window.scrollY;
       const antes = new Set([...app.querySelectorAll('[data-k]')].map(e => e.dataset.k));
@@ -45,7 +47,12 @@ document.addEventListener('submit', async ev => {
   }
   ocupado = true;
   form.querySelectorAll('button').forEach(b => b.disabled = true);
-  try { await fetch(form.action, {method: 'POST', body: datos, headers: {'X-Requested-With': 'fetch'}}); }
+  try {
+    const r = await fetch(form.action, {method: 'POST', body: datos, headers: {'X-Requested-With': 'fetch'}});
+    if (form.action.endsWith('/logout')) { location.href = '/login?salio=1'; return; }
+    if (r.status === 401) { location.href = '/login'; return; }
+    if (r.status === 403) avisar(await r.text());
+  }
   finally { ocupado = false; ultimo = ''; refrescar(); }
 });
 const nb = document.getElementById('notif');

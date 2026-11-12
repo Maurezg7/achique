@@ -1,5 +1,7 @@
 """Interfaz web del juez y registro público de transparencia, sin frameworks.
 
+- `/login`        Ingreso del juez con usuario y contraseña (ver sesiones.py). La Mesa, `/fragmento` y
+                  `/asistente.json` exigen sesión; las decisiones, además, que el juez esté de turno.
 - `/`             Mesa del juez: una sola página en vivo (pide `/fragmento` cada 1,5 s y lo reemplaza
                   en su lugar). Muestra el expediente completo (evidencia, riesgo colateral, hashes) para
                   que el juez de turno apruebe o rechace, y los reclamos con la propuesta de la plataforma.
@@ -14,6 +16,7 @@ una decisión "aprobada". El juez nunca ve ni toca la clave de firma.
 import json
 import threading
 import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,6 +27,7 @@ from .auditoria import verificar_cadena
 from .evidencia import pedir
 from . import LEMA, NOMBRE
 from .mesa import Mesa
+from .sesiones import COOKIE, Sesiones, Usuarios
 
 ICONO_RED = {"x": "𝕏", "telegram": "✈", "discord": "◆"}
 # Qué estado mostrar por proveedor cuando tiene varias órdenes del mismo bloqueo (reintentos, reemplazos).
@@ -77,6 +81,8 @@ class JuezHandler(BaseHTTPRequestHandler):
     local, visitante = "Azul Juniors", "Rojo Plate"
     turnos: List[dict] = []
     asistente: Asistente = Asistente()
+    usuarios: Optional[Usuarios] = None
+    sesiones: Sesiones = Sesiones()
 
     def log_message(self, formato, *args):
         pass
@@ -100,12 +106,77 @@ class JuezHandler(BaseHTTPRequestHandler):
         self.send_header("Location", destino)
         self.end_headers()
 
+    # --- sesión del juez ---------------------------------------------------------------------
+
+    def _token(self) -> Optional[str]:
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+        except Exception:
+            return None
+        m = cookie.get(COOKIE)
+        return m.value if m else None
+
+    def _juez_sesion(self) -> Optional[str]:
+        return self.sesiones.juez(self._token())
+
+    def _auditar(self, evento: str, **datos) -> None:
+        auditoria = getattr(self.mesa, "auditoria", None)
+        if auditoria is not None:
+            auditoria.registrar(evento, **datos)
+
+    def _ir(self, destino: str, cookie: Optional[str] = None) -> None:
+        self.send_response(303)
+        self.send_header("Location", destino)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _login(self, cuerpo: dict) -> None:
+        origen = self.client_address[0]
+        usuario = cuerpo.get("usuario", [""])[0].strip()
+        clave = cuerpo.get("clave", [""])[0]
+        conocido = usuario if self.usuarios and usuario in self.usuarios.por_usuario else "(desconocido)"
+        if self.sesiones.bloqueado(origen):
+            self._auditar("ingreso_bloqueado", usuario=conocido, origen=origen)
+            return self._ir("/login?error=bloqueado")
+        juez = self.usuarios.verificar(usuario, clave) if self.usuarios else None
+        if juez is None:
+            self.sesiones.registrar_fallo(origen)
+            self._auditar("ingreso_fallido", usuario=conocido, origen=origen)
+            return self._ir("/login?error=1")
+        self.sesiones.limpiar_fallos(origen)
+        token = self.sesiones.crear(juez)
+        self._auditar("ingreso_juez", usuario=usuario, juez_id=juez, origen=origen)
+        return self._ir("/", f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; "
+                             f"Max-Age={int(self.sesiones.duracion_seg)}")
+
+    def _pagina_login(self, query: dict) -> str:
+        error = query.get("error", [""])[0]
+        aviso = {"1": "Usuario o contraseña incorrectos.",
+                 "bloqueado": "Demasiados intentos fallidos: esperá un minuto y probá de nuevo."}.get(error, "")
+        if query.get("salio"):
+            aviso = "Sesión cerrada."
+        aviso_html = f"<p class='login-aviso{' error' if error else ''}'>{_escape(aviso)}</p>" if aviso else ""
+        return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{NOMBRE} · Ingreso del juez</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/estilos.css">
+</head><body class="login-body"><form class="login" method="post" action="/login">
+<div class="login-logo">{LOGO_APP}</div><h1>{NOMBRE}</h1><p class="login-sub">Mesa del juez · ingreso</p>{aviso_html}
+<label>Usuario<input name="usuario" autocomplete="username" required autofocus></label>
+<label>Contraseña<input name="clave" type="password" autocomplete="current-password" required></label>
+<button class="btn aprobar" type="submit">Ingresar</button>
+<small>Cada juez ve y firma solo lo que le toca mientras está de turno.<br>
+<a href="/transparencia">Registro público de bloqueos ↗</a></small></form></body></html>"""
+
+    # --- rutas -------------------------------------------------------------------------------
+
     def do_GET(self) -> None:
-        partes = [p for p in urlparse(self.path).path.split("/") if p]
-        if not partes:
-            return self._responder(PAGINA_BASE.replace("__TITULO__", "Mesa del juez").replace("__FRAG__", "/fragmento"))
-        if partes == ["fragmento"]:
-            return self._responder(self._fragmento())
+        url = urlparse(self.path)
+        partes = [p for p in url.path.split("/") if p]
+        if partes == ["login"]:
+            return self._responder(self._pagina_login(parse_qs(url.query)))
         if len(partes) == 2 and partes[0] == "static" and partes[1] in ESTATICOS:  # lista blanca: sin rutas arbitrarias
             return self._responder((WEB / partes[1]).read_text(encoding="utf-8"), tipo=ESTATICOS[partes[1]])
         if partes == ["transparencia"]:
@@ -113,11 +184,21 @@ class JuezHandler(BaseHTTPRequestHandler):
                                    .replace("__FRAG__", "/transparencia/fragmento"))
         if partes == ["transparencia", "fragmento"]:
             return self._responder(self._fragmento_transparencia())
-        if partes == ["asistente.json"]:
-            return self._responder(json.dumps(self._evaluar_asistente(), ensure_ascii=False, indent=2),
-                                   tipo="application/json; charset=utf-8")
         if partes == ["transparencia.json"]:
             return self._responder(json.dumps(self.mesa.vista_transparencia(), ensure_ascii=False, indent=2),
+                                   tipo="application/json; charset=utf-8")
+        # Desde acá, solo con sesión de juez (la Mesa muestra evidencia interna).
+        juez = self._juez_sesion()
+        if not partes:
+            if juez is None:
+                return self._ir("/login")
+            return self._responder(PAGINA_BASE.replace("__TITULO__", "Mesa del juez").replace("__FRAG__", "/fragmento"))
+        if partes in (["fragmento"], ["asistente.json"]) and juez is None:
+            return self._responder("Iniciá sesión", 401, "text/plain; charset=utf-8")
+        if partes == ["fragmento"]:
+            return self._responder(self._fragmento(juez))
+        if partes == ["asistente.json"]:
+            return self._responder(json.dumps(self._evaluar_asistente(), ensure_ascii=False, indent=2),
                                    tipo="application/json; charset=utf-8")
         self._responder("No encontrado", 404)
 
@@ -125,11 +206,25 @@ class JuezHandler(BaseHTTPRequestHandler):
         largo = int(self.headers.get("Content-Length", "0"))
         cuerpo = parse_qs(self.rfile.read(largo).decode("utf-8"))
         partes = [p for p in urlparse(self.path).path.split("/") if p]
+        if partes == ["login"]:
+            return self._login(cuerpo)
+        if partes == ["logout"]:
+            juez = self.sesiones.cerrar(self._token())
+            if juez:
+                self._auditar("salida_juez", juez_id=juez)
+            return self._ir("/login?salio=1", f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
         if len(partes) == 3 and partes[0] in ("expedientes", "reclamos") and partes[2] == "decidir":
-            aprobar = cuerpo.get("decision", [""])[0] == "aprobar"
-            juez_id, minuto = self._juez_de_turno()
+            juez_id = self._juez_sesion()
             if juez_id is None:
-                return self._redirigir()  # sin juez de turno nadie puede decidir ni firmar
+                return self._responder("Iniciá sesión", 401, "text/plain; charset=utf-8")
+            de_turno, minuto = self._turno()
+            if juez_id not in de_turno:
+                # El saliente (o cualquiera fuera de turno) ya no puede decidir ni firmar.
+                self._auditar("decision_denegada", juez_id=juez_id, objeto=f"{partes[0]}/{partes[1]}",
+                              motivo="fuera de turno", minuto=minuto)
+                return self._responder("No estás de turno: no podés decidir ni firmar.", 403,
+                                       "text/plain; charset=utf-8")
+            aprobar = cuerpo.get("decision", [""])[0] == "aprobar"
             if partes[0] == "expedientes":
                 self.mesa.decidir_expediente(partes[1], aprobar, juez_id, cuerpo.get("motivo", [""])[0], minuto)
             else:
@@ -137,13 +232,12 @@ class JuezHandler(BaseHTTPRequestHandler):
             return self._redirigir()
         self._responder("No encontrado", 404)
 
-    def _juez_de_turno(self):
+    def _turno(self) -> tuple:
         try:
             estado = pedir(self.base_simulador, "/estado")
-            de_turno = estado["jueces_de_turno"]
-            return (de_turno[0] if de_turno else None), estado.get("minuto_actual")
+            return list(estado.get("jueces_de_turno", [])), estado.get("minuto_actual")
         except Exception:
-            return None, None
+            return [], None
 
     @classmethod
     def _estado_simulador(cls) -> dict:
@@ -286,7 +380,7 @@ class JuezHandler(BaseHTTPRequestHandler):
         todos, reclamos, grupos = cls._instantanea()
         return cls.asistente.evaluar(cls._estado_simulador(), todos, reclamos, grupos, cls._cadena_ok())
 
-    def _fragmento(self) -> str:
+    def _fragmento(self, juez: Optional[str] = None) -> str:
         est = self._estado_simulador()
         todos, reclamos, grupos = self._instantanea()
         # Primero los de riesgo colateral: son los que más exigen la mirada del juez.
@@ -303,10 +397,20 @@ class JuezHandler(BaseHTTPRequestHandler):
         demora_media = f"{sum(demoras) / len(demoras):.1f}′" if demoras else "—"
         cobertura = (sum(self._cobertura(g) for g in activos) / len(activos)) if activos else 0.0
         cadena_ok = self._cadena_ok()
-        panel_asistente = self._panel_asistente(self.asistente.evaluar(est, todos, reclamos, grupos, cadena_ok))
-
+        estado_asis = self.asistente.evaluar(est, todos, reclamos, grupos, cadena_ok)
         turno = est["turno"][0] if est["turno"] else None
+        en_turno = juez is not None and juez in est["turno"]
+        if not en_turno:
+            # Cada juez ve y firma solo lo suyo mientras está de turno: fuera de turno no hay nada que decidir.
+            quien = self._nombre_juez(turno) if turno else "el próximo juez de turno"
+            estado_asis = dict(estado_asis, siguiente={"texto": f"No estás de turno: los pendientes los decide {quien}.",
+                                                       "foco": ".sesion"})
+        panel_asistente = self._panel_asistente(estado_asis)
+
         derecha = (f"<small>Juez de turno</small><b>{_escape(self._nombre_juez(turno)) if turno else 'Sin turno'}</b>"
+                   f"<span class='sesion'>👤 {_escape(self._nombre_juez(juez))} · "
+                   f"<b class='{'en-turno' if en_turno else 'fuera-turno'}'>{'De turno' if en_turno else 'Fuera de turno'}</b>"
+                   "<form method='post' action='/logout'><button type='submit' class='salir'>Salir</button></form></span>"
                    f"<span class='chain {'ok' if cadena_ok else 'bad'}'>{'🔒 Auditoría íntegra' if cadena_ok else '⚠ Auditoría alterada'}</span>"
                    "<a class='pub' href='/transparencia' target='_blank'>Registro público ↗</a>"
                    "<button type='button' class='guia-btn' data-guia>🧭 Guía de la mesa</button>")
@@ -326,6 +430,14 @@ class JuezHandler(BaseHTTPRequestHandler):
             "<div class='vacio'>Todavía no se decidió ningún expediente.</div>"
         sin_turno = "" if turno else ("<div class='banner'>⚠ No hay juez de turno en este momento: "
                                       "nadie puede decidir ni firmar.</div>")
+        if turno and not en_turno:
+            sin_turno = (f"<div class='banner'>⚠ Estás fuera de turno: el juez de turno es "
+                         f"{_escape(self._nombre_juez(turno))}. Podés ver el estado, pero no decidir ni firmar.</div>")
+            seccion_reclamos, mas = "", ""
+            cards = ("<div class='vacio grande'><div class='vacio-ico'>⏸</div><b>No estás de turno</b>"
+                     f"<span>{len(pendientes)} expediente(s) y {len(reclamos_pend)} reclamo(s) pendientes los decide "
+                     f"{_escape(self._nombre_juez(turno))}.</span></div>")
+            pendientes, reclamos_pend = [], []
 
         return f"""
 <div id="meta" data-pendientes="{_escape(','.join(d.expediente.id for d in pendientes))}"
@@ -490,8 +602,11 @@ para no ofrecer un mapa para evadir el próximo bloqueo. Los bloqueos por IP ven
 
 
 def iniciar_servidor_juez(mesa: Mesa, base_simulador: str, puerto: int, despachador=None,
-                          equipos: tuple = ("Azul Juniors", "Rojo Plate")) -> ThreadingHTTPServer:
+                          equipos: tuple = ("Azul Juniors", "Rojo Plate"),
+                          usuarios: Optional[Usuarios] = None) -> ThreadingHTTPServer:
     JuezHandler.mesa = mesa
+    JuezHandler.usuarios = usuarios or Usuarios()
+    JuezHandler.sesiones = Sesiones()
     JuezHandler.base_simulador = base_simulador
     JuezHandler.local, JuezHandler.visitante = equipos
     try:

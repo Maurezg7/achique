@@ -14,7 +14,8 @@ Python 3.9+ y **solo biblioteca estándar**. Corre contra el simulador oficial; 
 Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entrega/achique_logo.svg)).
 
 1. **Correr** (Python 3.9+, sin instalar nada): simulador oficial + plataforma, ver [Cómo correrla](#cómo-correrla).
-2. **Abrir la Mesa del juez** (`http://localhost:8090`). La primera vez se abre una **guía de 13 pasos** (botón 🧭
+2. **Ingresar a la Mesa del juez** (`http://localhost:8090`) con un usuario de demostración (ver
+   [Ingreso de los jueces](#ingreso-de-los-jueces)). La primera vez se abre una **guía de 13 pasos** (botón 🧭
    para volver a verla) que recorre marcador, expedientes, riesgo colateral, firma, reclamos, órdenes y registro público.
 3. **Aprobar los expedientes** con *Aprobar y firmar*. El **Asistente del juez** (panel derecho) marca el siguiente
    paso, avisa demoras, órdenes fallidas o rechazadas y bloqueos por IP cerca del final, y explica cada expediente
@@ -26,7 +27,7 @@ Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entr
 | Circuito completo | detección → expediente → juez de turno → proveedores → confirmación → vencimiento ([Arquitectura](#arquitectura)) |
 | Daño colateral | IP compartida o CDN ⇒ se pide el **dominio**; tarjeta "Riesgo de daño colateral" y explicación del asistente |
 | Evidencia verificable | `entrega/expediente_ejemplo*.json`, `python3 -m achique.evidencia` |
-| Firma humana y de turno | `firmas.py` resuelve el juez de turno al firmar; sin auto-aprobación |
+| Ingreso y firma de turno | Login con usuario y contraseña (`sesiones.py`); firma solo el juez que inició sesión, aprobó y sigue de turno; al cambio de turno lo pendiente pasa al entrante |
 | Auditoría | `python3 -m achique.auditoria entrega/auditoria_ejemplo.jsonl` → *Cadena íntegra: SÍ* |
 | Transparencia | `/transparencia` y `/transparencia.json` |
 | Pitch | `entrega/presentacion.pptx`, `entrega/guion_pitch.md`, `entrega/guion_video.md` |
@@ -68,7 +69,8 @@ python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --
     --juzgados datos/juzgados.json --log salida/auditoria.jsonl
 ```
 
-- **Mesa del juez:** <http://localhost:8090> — aprobar o rechazar cada expediente (nadie aprueba solo).
+- **Mesa del juez:** <http://localhost:8090> — ingresar con usuario y contraseña y aprobar o rechazar cada
+  expediente (nadie aprueba solo).
 - **Registro público:** <http://localhost:8090/transparencia> (y `/transparencia.json`).
 - Cada expediente se exporta a `salida/expedientes/EXP-….json`.
 - El marcador muestra por defecto **Azul Juniors vs Rojo Plate** por la ficticia **LFA · Liga de Fútbol Argentino**
@@ -92,6 +94,30 @@ Tests (sin dependencias, sin red):
 cd mi_solucion-futbol && python3 -m unittest discover -s tests -v
 ```
 
+## Ingreso de los jueces
+
+Cada juez entra con su propio usuario y contraseña. Los usuarios de demostración están atados a los jueces ficticios
+de `datos/juzgados.json` (los mismos del partido final) y sirven también ese día:
+
+| Usuario | Contraseña (demo) | Juez | Turno en el escenario |
+|---|---|---|---|
+| `laura` | `laura-demo-2026` | Dra. Laura Ficticia (`jueza-laura-ficticia`) | hasta el minuto 50 |
+| `martin` | `martin-demo-2026` | Dr. Martín Ejemplo (`juez-martin-ejemplo`) | desde el minuto 50 |
+
+- **Solo firma el que aprobó y está de turno.** La plataforma firma con la clave de un juez solo después de que ese
+  juez inició sesión y aprobó; nadie firma en su nombre. La decisión exige estar de turno (si no, HTTP 403 y
+  `decision_denegada` en la auditoría) y la firma lo vuelve a comprobar en el instante de firmar.
+- **Cada juez ve lo suyo.** Fuera de turno, la Mesa no muestra expedientes ni reclamos para decidir: indica quién
+  está de turno y cuántos pendientes tiene.
+- **Cambio de turno.** Lo pendiente pasa al juez entrante y el saliente ya no puede firmar. Si el saliente aprobó y
+  cambió el turno antes de que se firmara, o una orden suya falló y hay que reintentarla, el expediente vuelve a la
+  Mesa del entrante (`expediente_reasignado` / `reintento_requiere_juez_de_turno`); lo ya enviado no se duplica.
+- **Seguridad.** Contraseñas con PBKDF2-SHA256 (200 000 iteraciones, sal por usuario); en el repo solo hay sal y
+  hash. Sesión con token aleatorio en cookie `HttpOnly` y `SameSite=Strict`, vence a las 8 h, y 5 intentos fallidos
+  frenan el ingreso 1 minuto. La auditoría registra ingresos, salidas e intentos fallidos, nunca la contraseña.
+- Otro usuario: `python3 -m achique.sesiones <usuario> <juez_id>` pide la contraseña e imprime la entrada para
+  `achique/usuarios_demo.json` (o un archivo propio con `--usuarios`).
+
 ## Estructura
 
 ```
@@ -103,7 +129,9 @@ mi_solucion-futbol/
 │   ├── plataforma.py          # main(): hilos de ingesta, despacho, reclamos y servidor HTTP
 │   ├── evidencia.py           # expediente + verificación de sello (CLI)
 │   ├── mesa.py                # estado compartido y decisiones del juez
-│   ├── firmas.py              # HMAC con el juez de turno al firmar
+│   ├── firmas.py              # HMAC en nombre del juez que aprobó, solo si está de turno
+│   ├── sesiones.py            # ingreso de los jueces (PBKDF2) y sesiones por cookie
+│   ├── usuarios_demo.json     # usuarios de demostración (sal + hash, sin contraseñas)
 │   ├── despacho.py            # único que firma; envío, seguimiento y reintentos
 │   ├── reclamos.py            # verificación y resolución de reclamos
 │   ├── auditoria.py           # cadena de hashes (CLI de verificación)
@@ -117,10 +145,10 @@ mi_solucion-futbol/
 ## Arquitectura
 
 ```
-detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez humano: aprobar / rechazar)
+detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez con sesión y de turno: aprobar / rechazar)
                 (expediente)      │
                                   ▼ solo lo "aprobado"
-                            despacho.py ── firmas.py (juez de turno AHORA) ──► proveedores
+                            despacho.py ── firmas.py (el que aprobó, si sigue de turno) ──► proveedores
                                   │            ▲                                  │
                             reclamos.py ───────┘ levantar + precisar          confirmación
                                   │                                               │
@@ -131,7 +159,8 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 |---|---|
 | `evidencia.py` | Verifica la marca de agua contra `/partido`, descarta licenciatarios en su dominio y señales de otro partido, identifica servidor (host, IP, ASN, organización), evalúa riesgo colateral con DNS pasivo, calcula hashes y **sella** el expediente. |
 | `mesa.py` | Estado compartido con un único lock: expedientes (con re-detecciones), reclamos, decisiones del juez (auditadas) y estado de cada orden. |
-| `firmas.py` | HMAC-SHA256 según el README oficial con el juez de turno resuelto **en el instante de firmar** (nunca cacheado). |
+| `firmas.py` | HMAC-SHA256 según el README oficial, **en nombre del juez que aprobó** y solo si sigue de turno en el instante de firmar (turno nunca cacheado). Si no, `FueraDeTurno`: nadie firma por él. |
+| `sesiones.py` | Usuarios de los jueces con contraseña PBKDF2-SHA256 (sal por usuario, comparación en tiempo constante), sesiones con token aleatorio en cookie `HttpOnly` + `SameSite=Strict` y freno tras 5 intentos fallidos. |
 | `despacho.py` | Único que firma. Envía a cada proveedor en el tipo que acepta, sigue la orden hasta `aplicada` y `vencida`, reintenta fallidas (sin multiplicarlas) y firma levantamientos. |
 | `reclamos.py` | Verifica cada reclamo, propone mantener / levantar / levantar y precisar, y ejecuta lo que el juez aprobó en **todos** los proveedores afectados. |
 | `auditoria.py` | JSONL append-only encadenado por SHA-256; `verificar_cadena()` detecta cualquier edición o borrado. |
@@ -163,7 +192,8 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 - El dominio base se aproxima con las dos últimas etiquetas del host (válido para `.test` / `.example`;
   en producción se usaría la Public Suffix List).
 - El vencimiento propuesto es el fin del partido (`fin_min`) para IP y dominio; el proveedor lo aplica solo.
-- Quien hace clic en la Mesa del juez es el juez de turno que informa `/estado` (la demo no tiene login).
+- El turno lo informa `/estado` del simulador; la plataforma lo consulta en cada decisión y en cada firma.
+- Las sesiones viven en memoria: si se reinicia la plataforma, los jueces vuelven a ingresar.
 - La firma HMAC con claves de demostración reemplaza a la firma digital real del juez.
 
 ## Qué existía antes del evento

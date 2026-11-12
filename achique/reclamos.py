@@ -94,10 +94,14 @@ class GestorReclamos:
                 motivo="No se identificó el dominio pirata real que compartía la IP")
         for host_real in sorted(piratas_en_ip):
             self.despachador.enviar_orden(proveedor_id, orden.get("expediente_id", "reclamo"),
-                                          "dominio", host_real, orden.get("vence_min", 105))
+                                          "dominio", host_real, orden.get("vence_min", 105), decision.decidido_por)
 
     def resolver_aprobados(self) -> None:
         for decision in self.mesa.aprobados_sin_resolver_reclamo():
+            if decision.decidido_por not in self.despachador.jueces.jueces_de_turno():
+                self.mesa.devolver_reclamo_a_pendiente(decision.reclamo["id"], motivo=(
+                    f"{decision.decidido_por} dejó el turno antes de la firma: decide el juez entrante"))
+                continue
             orden = decision.orden_afectada
             if orden and decision.propuesta in ("levantar", "levantar_y_precisar"):
                 motivo = f"Reclamo {decision.reclamo['id']}: {decision.razon}"
@@ -109,7 +113,7 @@ class GestorReclamos:
                               if o.tipo == orden["tipo"] and o.objetivo == orden["objetivo"]
                               and o.estado in ("recibida", "aplicada")}
                 for proveedor_id, orden_id in sorted(objetivos):
-                    resp = self.despachador.levantar_orden(proveedor_id, orden_id, motivo=motivo)
+                    resp = self.despachador.levantar_orden(proveedor_id, orden_id, motivo, decision.decidido_por)
                     if decision.propuesta == "levantar_y_precisar" and resp.get("estado") == "levantada":
                         self._reemplazar_por_dominio(decision, orden, proveedor_id)
             self.mesa.marcar_reclamo_resuelto(decision.reclamo["id"])

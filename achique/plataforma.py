@@ -4,7 +4,7 @@ Hilos:
   - ingesta:   detecciones -> verifica y arma expedientes -> Mesa (NO auto-aprueba)
   - despacho:  firma y envía las órdenes que el juez aprobó, sigue confirmaciones, reintenta fallidas
   - reclamos:  revisa reclamos nuevos, propone resolución, ejecuta las que el juez aprobó
-  - juez HTTP: dashboard donde un humano aprueba/rechaza y registro público (servidor_juez.py)
+  - juez HTTP: el juez ingresa con su usuario, aprueba/rechaza durante su turno; registro público (servidor_juez.py)
 
 Uso (desde la raíz del repo o con el repo en el PYTHONPATH):
   python3 plataforma.py --simulador http://localhost:8000 --puerto-juez 8090
@@ -23,6 +23,7 @@ from .firmas import RegistroJueces
 from .mesa import Mesa
 from .reclamos import GestorReclamos, hilo_reclamos
 from .servidor_juez import iniciar_servidor_juez
+from .sesiones import USUARIOS_DEMO, Usuarios
 
 
 class Ingesta:
@@ -82,6 +83,8 @@ def main() -> None:
     ap.add_argument("--puerto-juez", type=int, default=8090)
     ap.add_argument("--log", default="salida/registro_plataforma.jsonl")
     ap.add_argument("--juzgados", default="datos/juzgados.json")
+    ap.add_argument("--usuarios", default=str(USUARIOS_DEMO),
+                    help="usuarios de los jueces (usuario, juez_id, sal y hash PBKDF2); por defecto los de demostración")
     ap.add_argument("--local", default="Azul Juniors", help="nombre del equipo local en el marcador (solo visual)")
     ap.add_argument("--visitante", default="Rojo Plate", help="nombre del equipo visitante en el marcador (solo visual)")
     args = ap.parse_args()
@@ -106,9 +109,14 @@ def main() -> None:
     ]
     for hilo in hilos:
         hilo.start()
-    servidor_juez = iniciar_servidor_juez(mesa, base, args.puerto_juez, despachador, (args.local, args.visitante))
+    usuarios = Usuarios(Path(args.usuarios))
+    sin_juez = sorted({u["juez_id"] for u in usuarios.por_usuario.values()} - set(jueces.jueces))
+    if sin_juez:
+        print(f"Aviso: usuarios atados a jueces que no están en {args.juzgados}: {', '.join(sin_juez)}")
+    servidor_juez = iniciar_servidor_juez(mesa, base, args.puerto_juez, despachador, (args.local, args.visitante),
+                                          usuarios)
 
-    print(f"Achique en marcha. Mesa del juez: http://localhost:{args.puerto_juez}/")
+    print(f"Achique en marcha. Mesa del juez: http://localhost:{args.puerto_juez}/ (ingreso con usuario y contraseña)")
     print(f"Registro público de transparencia: http://localhost:{args.puerto_juez}/transparencia")
     print(f"Auditoría: {args.log}")
     try:

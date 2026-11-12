@@ -1,0 +1,19 @@
+{
+  "aviso": "Usuarios de demostración de los jueces ficticios de datos/juzgados.json. Contraseñas en el README (solo demo).",
+  "usuarios": [
+    {
+      "usuario": "laura",
+      "juez_id": "jueza-laura-ficticia",
+      "sal": "b9bf424fbb761b60b4d35ba375ef43f7",
+      "iteraciones": 200000,
+      "hash": "78b319c6e47197545c0c731e930520deec154588202598212d94e050bdaebe25"
+    },
+    {
+      "usuario": "martin",
+      "juez_id": "juez-martin-ejemplo",
+      "sal": "f3e5eae9dad1b0b3dec809b03f97907a",
+      "iteraciones": 200000,
+      "hash": "ca7be757af13a24366d272c5e962acc2613097fa83cb18c5cbf9d6d4bf419685"
+    }
+  ]
+}

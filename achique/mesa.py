@@ -85,6 +85,18 @@ class Mesa:
                           segundos_en_mesa=round(decision.decidido_min - decision.creado_ts, 2))
             return True
 
+    def devolver_a_pendiente(self, exp_id: str, motivo: str) -> bool:
+        """El juez que aprobó dejó el turno antes de que se firmara todo: pasa al juez entrante."""
+        with self.lock:
+            decision = self.expedientes.get(exp_id)
+            if decision is None or decision.estado not in ("aprobado", "despachado"):
+                return False
+            anterior = decision.decidido_por
+            decision.estado, decision.decidido_por, decision.decidido_min = "pendiente", None, None
+            decision.minuto_decision = None
+            self._auditar("expediente_reasignado", expediente_id=exp_id, juez_saliente=anterior, motivo=motivo)
+            return True
+
     def pendientes_expedientes(self) -> List[DecisionExpediente]:
         with self.lock:
             return [decision for decision in self.expedientes.values() if decision.estado == "pendiente"]
@@ -112,6 +124,15 @@ class Mesa:
             decision.decidido_por = juez_id
             self._auditar("decision_juez_reclamo", reclamo_id=reclamo_id, propuesta=decision.propuesta,
                           decision=decision.estado, juez_id=juez_id)
+            return True
+
+    def devolver_reclamo_a_pendiente(self, reclamo_id: str, motivo: str) -> bool:
+        with self.lock:
+            decision = self.reclamos.get(reclamo_id)
+            if decision is None or decision.estado != "aprobado":
+                return False
+            anterior, decision.estado, decision.decidido_por = decision.decidido_por, "pendiente", None
+            self._auditar("reclamo_reasignado", reclamo_id=reclamo_id, juez_saliente=anterior, motivo=motivo)
             return True
 
     def pendientes_reclamos(self) -> List[DecisionReclamo]:

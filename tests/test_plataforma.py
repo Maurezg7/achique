@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import sys
 import tempfile
@@ -9,10 +10,11 @@ import threading
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from achique import despacho, evidencia, firmas  # noqa: E402
+from achique import despacho, evidencia, firmas, servidor_juez, sesiones  # noqa: E402
 from achique.auditoria import RegistroAuditoria, verificar_cadena  # noqa: E402
 from achique.mesa import Mesa  # noqa: E402
 
@@ -140,17 +142,23 @@ class TestFirmas(ConSimulador):
         self.assertEqual(firmas.mensaje_orden("o1", "ip", "1.2.3.4", 105, "j"), "o1|ip|1.2.3.4|105|j")
         self.assertEqual(firmas.mensaje_levantar("o1", "j"), "LEVANTAR|o1|j")
 
-    def test_firma_con_el_juez_de_turno_en_el_instante(self):
-        orden = self.jueces.firmar_orden("o1", "dominio", "x.test", 105)
+    def test_firma_el_juez_que_aprobo_si_esta_de_turno(self):
+        orden = self.jueces.firmar_orden("o1", "dominio", "x.test", 105, "jueza-a")
         esperada = hmac.new(b"clave-a", b"o1|dominio|x.test|105|jueza-a", hashlib.sha256).hexdigest()
         self.assertEqual((orden["juez_id"], orden["juzgado_id"], orden["firma"]), ("jueza-a", "jg-a", esperada))
+
+    def test_nadie_firma_en_nombre_de_un_juez_fuera_de_turno(self):
         self.sim.de_turno = ["juez-b"]  # cambio de turno: no se cachea
-        self.assertEqual(self.jueces.firmar_orden("o2", "ip", "1.1.1.1", 105)["juez_id"], "juez-b")
+        with self.assertRaises(firmas.FueraDeTurno):
+            self.jueces.firmar_orden("o2", "ip", "1.1.1.1", 105, "jueza-a")
+        with self.assertRaises(firmas.FueraDeTurno):
+            self.jueces.firmar_levantamiento("o2", "reclamo", "jueza-a")
+        self.assertEqual(self.jueces.firmar_orden("o3", "ip", "1.1.1.1", 105, "juez-b")["juez_id"], "juez-b")
 
     def test_sin_juez_de_turno_no_se_firma(self):
         self.sim.de_turno = []
         with self.assertRaises(RuntimeError):
-            self.jueces.firmar_orden("o1", "ip", "1.1.1.1", 105)
+            self.jueces.firmar_orden("o1", "ip", "1.1.1.1", 105, "jueza-a")
 
 
 class TestEvidencia(ConSimulador):
@@ -242,6 +250,41 @@ class TestDespacho(ConSimulador):
         self.assertTrue(verificar_cadena(self.auditoria.ruta))
 
 
+class TestCambioDeTurno(ConSimulador):
+    def _aprobado(self, det):
+        exp = self.builder.construir(det)
+        self.mesa.nuevo_expediente(exp)
+        self.mesa.decidir_expediente(exp.id, True, "jueza-a")
+        return exp
+
+    def test_aprobado_por_el_saliente_sin_firmar_pasa_al_entrante(self):
+        d = despacho.Despachador("http://sim", self.mesa, self.jueces, self.auditoria)
+        exp = self._aprobado(deteccion())
+        self.sim.de_turno = ["juez-b"]
+        d.despachar_expediente(exp)
+        self.assertEqual(self.sim.recibidas, [])
+        self.assertEqual(self.mesa.expedientes[exp.id].estado, "pendiente")
+        self.assertTrue(self.mesa.decidir_expediente(exp.id, True, "juez-b"))
+        d.despachar_expediente(exp)
+        self.assertEqual({c["juez_id"] for _, c in self.sim.recibidas}, {"juez-b"})
+
+    def test_reintento_tras_cambio_de_turno_vuelve_a_la_mesa(self):
+        self.sim.estado_inicial["grande"] = "fallida"
+        d = despacho.Despachador("http://sim", self.mesa, self.jueces, self.auditoria)
+        exp = self._aprobado(deteccion())
+        d.despachar_expediente(exp)
+        self.sim.de_turno = ["juez-b"]
+        d.seguir_ordenes()
+        self.assertEqual([c["juez_id"] for p, c in self.sim.recibidas if p == "grande"], ["jueza-a"])
+        self.assertEqual(self.mesa.expedientes[exp.id].estado, "pendiente")
+        self.sim.estado_inicial.pop("grande")
+        self.mesa.decidir_expediente(exp.id, True, "juez-b")
+        d.despachar_expediente(exp)
+        enviadas = [(p, c["juez_id"]) for p, c in self.sim.recibidas]
+        self.assertEqual(enviadas, [("grande", "jueza-a"), ("chico", "jueza-a"), ("grande", "juez-b")])
+        self.assertTrue(verificar_cadena(self.auditoria.ruta))
+
+
 class TestMesaConcurrente(ConSimulador):
     def test_una_sola_decision_gana(self):
         exp = self.builder.construir(deteccion())
@@ -272,3 +315,124 @@ class TestMesaConcurrente(ConSimulador):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSesiones(unittest.TestCase):
+    def test_usuarios_demo_atados_a_los_jueces_oficiales(self):
+        u = sesiones.Usuarios()
+        self.assertEqual(u.verificar("laura", "laura-demo-2026"), "jueza-laura-ficticia")
+        self.assertEqual(u.verificar("martin", "martin-demo-2026"), "juez-martin-ejemplo")
+        self.assertIsNone(u.verificar("laura", "martin-demo-2026"))
+        self.assertIsNone(u.verificar("nadie", "laura-demo-2026"))
+        self.assertNotIn("laura-demo-2026", sesiones.USUARIOS_DEMO.read_text(encoding="utf-8"))
+
+    def test_sesion_vence_y_se_cierra(self):
+        s = sesiones.Sesiones()
+        t = s.crear("jueza-a")
+        self.assertEqual(s.juez(t), "jueza-a")
+        self.assertIsNone(s.juez("otro-token"))
+        self.assertEqual(s.cerrar(t), "jueza-a")
+        self.assertIsNone(s.juez(t))
+        self.assertIsNone(sesiones.Sesiones(duracion_seg=0).juez(sesiones.Sesiones(duracion_seg=0).crear("x")))
+
+    def test_bloqueo_por_intentos_fallidos(self):
+        s = sesiones.Sesiones()
+        for _ in range(sesiones.MAX_FALLOS):
+            self.assertFalse(s.bloqueado("1.2.3.4"))
+            s.registrar_fallo("1.2.3.4")
+        self.assertTrue(s.bloqueado("1.2.3.4"))
+        self.assertFalse(s.bloqueado("5.6.7.8"))
+        s.limpiar_fallos("1.2.3.4")
+        self.assertFalse(s.bloqueado("1.2.3.4"))
+
+
+class TestMesaConIngreso(ConSimulador):
+    """La Mesa por HTTP: sin sesión no se ve nada; fuera de turno no se decide ni se firma."""
+
+    def setUp(self):
+        super().setUp()
+        ruta = Path(self.tmp.name) / "usuarios.json"
+        ruta.write_text(json.dumps({"usuarios": [sesiones.crear_usuario("a", "jueza-a", "clave-a-demo"),
+                                                 sesiones.crear_usuario("b", "juez-b", "clave-b-demo")]}),
+                        encoding="utf-8")
+        for p in (mock.patch.object(servidor_juez, "pedir", self.sim.pedir),
+                  mock.patch.object(servidor_juez, "vigilar_con_asistente", lambda *a: None)):
+            p.start()
+            self.parches.append(p)
+        self.servidor = servidor_juez.iniciar_servidor_juez(self.mesa, "http://sim", 0, usuarios=sesiones.Usuarios(ruta))
+        self.puerto = self.servidor.server_address[1]
+        self.exp = self.builder.construir(deteccion())
+        self.mesa.nuevo_expediente(self.exp)
+
+    def tearDown(self):
+        self.servidor.shutdown()
+        self.servidor.server_close()
+        super().tearDown()
+
+    def _pedir(self, metodo, ruta, datos=None, cookie=None, fetch=False):
+        c = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=5)
+        cab = {"Content-Type": "application/x-www-form-urlencoded"}
+        if cookie:
+            cab["Cookie"] = cookie
+        if fetch:
+            cab["X-Requested-With"] = "fetch"
+        c.request(metodo, ruta, urlencode(datos or {}), cab)
+        r = c.getresponse()
+        cuerpo = r.read().decode("utf-8")
+        c.close()
+        return r.status, dict(r.getheaders()), cuerpo
+
+    def _ingresar(self, usuario, clave):
+        estado, cab, _ = self._pedir("POST", "/login", {"usuario": usuario, "clave": clave})
+        self.assertEqual((estado, cab["Location"]), (303, "/"))
+        self.assertIn("HttpOnly", cab["Set-Cookie"])
+        return cab["Set-Cookie"].split(";")[0]
+
+    def test_sin_sesion_no_se_ve_la_mesa(self):
+        estado, cab, _ = self._pedir("GET", "/")
+        self.assertEqual((estado, cab["Location"]), (303, "/login"))
+        self.assertEqual(self._pedir("GET", "/fragmento")[0], 401)
+        self.assertEqual(self._pedir("GET", "/asistente.json")[0], 401)
+        self.assertEqual(self._pedir("POST", f"/expedientes/{self.exp.id}/decidir", {"decision": "aprobar"})[0], 401)
+        self.assertEqual(self._pedir("GET", "/transparencia.json")[0], 200)  # el registro público sigue público
+        self.assertEqual(self.mesa.expedientes[self.exp.id].estado, "pendiente")
+
+    def test_clave_incorrecta(self):
+        estado, cab, _ = self._pedir("POST", "/login", {"usuario": "a", "clave": "mal"})
+        self.assertEqual((estado, cab["Location"]), (303, "/login?error=1"))
+        self.assertNotIn("Set-Cookie", cab)
+        self.assertNotIn("mal", self.auditoria.ruta.read_text(encoding="utf-8"))
+
+    def test_fuera_de_turno_no_decide_y_el_de_turno_si(self):
+        cookie_b = self._ingresar("b", "clave-b-demo")
+        _, _, frag = self._pedir("GET", "/fragmento", cookie=cookie_b)
+        self.assertIn("No estás de turno", frag)
+        estado, _, _ = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir", {"decision": "aprobar"},
+                                   cookie=cookie_b, fetch=True)
+        self.assertEqual(estado, 403)
+        self.assertEqual(self.mesa.expedientes[self.exp.id].estado, "pendiente")
+        self.assertIn("decision_denegada", self.auditoria.ruta.read_text(encoding="utf-8"))
+
+        cookie_a = self._ingresar("a", "clave-a-demo")
+        self.assertIn(self.exp.id, self._pedir("GET", "/fragmento", cookie=cookie_a)[2])
+        estado, _, _ = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir", {"decision": "aprobar"},
+                                   cookie=cookie_a, fetch=True)
+        self.assertEqual(estado, 204)
+        d = self.mesa.expedientes[self.exp.id]
+        self.assertEqual((d.estado, d.decidido_por), ("aprobado", "jueza-a"))
+        self.assertTrue(verificar_cadena(self.auditoria.ruta))
+
+    def test_al_cambio_de_turno_el_saliente_ya_no_firma(self):
+        cookie_a = self._ingresar("a", "clave-a-demo")
+        self.sim.de_turno = ["juez-b"]
+        estado, _, _ = self._pedir("POST", f"/expedientes/{self.exp.id}/decidir", {"decision": "aprobar"},
+                                   cookie=cookie_a, fetch=True)
+        self.assertEqual(estado, 403)
+        cookie_b = self._ingresar("b", "clave-b-demo")
+        self.assertIn(self.exp.id, self._pedir("GET", "/fragmento", cookie=cookie_b)[2])
+
+    def test_salir_cierra_la_sesion(self):
+        cookie_a = self._ingresar("a", "clave-a-demo")
+        estado, cab, _ = self._pedir("POST", "/logout", cookie=cookie_a)
+        self.assertEqual((estado, cab["Location"]), (303, "/login?salio=1"))
+        self.assertEqual(self._pedir("GET", "/fragmento", cookie=cookie_a)[0], 401)

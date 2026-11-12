@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from .auditoria import RegistroAuditoria
 from .evidencia import Expediente, pedir
-from .firmas import RegistroJueces
+from .firmas import FueraDeTurno, RegistroJueces
 from .mesa import Mesa
 
 # Estados en los que una orden ya no necesita seguimiento.
@@ -28,6 +28,7 @@ class EstadoOrden:
     estado: str = "recibida"
     intentos: int = 0
     minuto_deteccion: Optional[float] = None
+    juez_id: str = ""
 
 
 def tipo_para_proveedor(exp: Expediente, capacidades: List[str]) -> Optional[tuple]:
@@ -67,11 +68,24 @@ class Despachador:
             return list(self.ordenes.values())
 
     def despachar_expediente(self, exp: Expediente) -> None:
-        """Envía la orden del expediente a cada proveedor con la capacidad necesaria."""
+        """Envía la orden del expediente a cada proveedor, firmada por el juez que la aprobó.
+
+        Si ese juez dejó el turno antes de que se firmara todo, el expediente vuelve a la Mesa
+        y lo decide el juez entrante (lo ya enviado no se duplica).
+        """
+        with self.mesa.lock:
+            juez_id = self.mesa.expedientes[exp.id].decidido_por
+        try:
+            self._despachar(exp, juez_id)
+        except FueraDeTurno as error:
+            self.mesa.devolver_a_pendiente(exp.id, motivo=str(error))
+
+    def _despachar(self, exp: Expediente, juez_id: str) -> None:
         self.auditoria.registrar("expediente_aprobado", expediente_id=exp.id, hash_expediente=exp.hash_expediente,
                                  tipo=exp.tipo_recomendado, objetivo=exp.objetivo_recomendado)
         for proveedor in self.proveedores:
-            if any(o.expediente_id == exp.id and o.proveedor_id == proveedor["id"] for o in self.lista_ordenes()):
+            if any(o.expediente_id == exp.id and o.proveedor_id == proveedor["id"]
+                   and o.estado not in ("fallida", "reemplazada") for o in self.lista_ordenes()):
                 continue  # ya enviada en un intento anterior que se cortó a mitad: no duplicar
             pedido = tipo_para_proveedor(exp, proveedor["capacidades"])
             if pedido is None:
@@ -83,21 +97,21 @@ class Despachador:
                                          proveedor=proveedor["id"], tipo=pedido[0], objetivo=pedido[1],
                                          motivo="El proveedor no bloquea por IP: se pide el dominio del stream")
             self.enviar_orden(proveedor["id"], exp.id, pedido[0], pedido[1], exp.vencimiento_propuesto,
-                              minuto_deteccion=exp.minuto_deteccion)
+                              juez_id, minuto_deteccion=exp.minuto_deteccion)
         self.mesa.marcar_despachado(exp.id)
 
     def enviar_orden(self, proveedor_id: str, exp_id: str, tipo: str, objetivo: str, vence_min: int,
-                     intentos: int = 0, minuto_deteccion: Optional[float] = None) -> None:
-        """Firma (con el juez de turno en este instante) y envía una orden a un proveedor."""
+                     juez_id: str, intentos: int = 0, minuto_deteccion: Optional[float] = None) -> None:
+        """Firma en nombre del juez que aprobó (si sigue de turno) y envía una orden a un proveedor."""
         orden_id = self._nuevo_orden_id(exp_id)
-        orden_firmada = self.jueces.firmar_orden(orden_id, tipo, objetivo, vence_min)
+        orden_firmada = self.jueces.firmar_orden(orden_id, tipo, objetivo, vence_min, juez_id)
         orden_firmada["expediente_id"] = exp_id
         resp = pedir(self.base, f"/proveedores/{proveedor_id}/ordenes", orden_firmada, "POST")
         estado = resp.get("estado") or "rechazada"
         with self._lock:
             self.ordenes[f"{proveedor_id}:{orden_id}"] = EstadoOrden(
                 proveedor_id, orden_id, exp_id, tipo, objetivo, vence_min,
-                estado=estado, intentos=intentos, minuto_deteccion=minuto_deteccion)
+                estado=estado, intentos=intentos, minuto_deteccion=minuto_deteccion, juez_id=juez_id)
         self.mesa.registrar_orden_enviada(orden_firmada, proveedor_id, resp)
         self.auditoria.registrar("orden_enviada" if estado != "rechazada" else "orden_rechazada",
                                  expediente_id=exp_id, proveedor=proveedor_id, orden_id=orden_id, tipo=tipo,
@@ -131,7 +145,8 @@ class Despachador:
         vencimiento automático. Una orden fallida cuyo vence_min ya pasó no se reintenta: el
         proveedor la rechazaría ("vence_min debe ser posterior al minuto actual").
         """
-        minuto_actual = pedir(self.base, "/estado").get("minuto_actual", 0)
+        estado = pedir(self.base, "/estado")
+        minuto_actual, de_turno = estado.get("minuto_actual", 0), estado.get("jueces_de_turno", [])
         for orden in self.lista_ordenes():
             if orden.estado in ESTADOS_FINALES or (orden.estado == "aplicada" and minuto_actual < orden.vence_min):
                 continue
@@ -144,18 +159,28 @@ class Despachador:
                                          minuto_actual=minuto_actual)
                 orden.estado = "reemplazada"
                 continue
+            if orden.juez_id not in de_turno:
+                # Quien firmó ya no está de turno: nadie reintenta en su nombre; decide el juez entrante.
+                orden.estado = "reemplazada"
+                self.auditoria.registrar("reintento_requiere_juez_de_turno", proveedor=orden.proveedor_id,
+                                         orden_id=orden.orden_id, expediente_id=orden.expediente_id,
+                                         juez_saliente=orden.juez_id)
+                self.mesa.devolver_a_pendiente(orden.expediente_id, motivo=f"Falló la orden en {orden.proveedor_id} "
+                                               "y el juez que la firmó ya no está de turno")
+                continue
             self.auditoria.registrar("reintento_orden", proveedor=orden.proveedor_id, orden_id=orden.orden_id,
                                      expediente_id=orden.expediente_id, intento=orden.intentos + 1)
             self.enviar_orden(orden.proveedor_id, orden.expediente_id, orden.tipo, orden.objetivo,
-                              orden.vence_min, intentos=orden.intentos + 1, minuto_deteccion=orden.minuto_deteccion)
+                              orden.vence_min, orden.juez_id, intentos=orden.intentos + 1,
+                              minuto_deteccion=orden.minuto_deteccion)
             orden.estado = "reemplazada"  # la nueva hereda el conteo: una sola cadena de reintentos
 
     # Nombre histórico: se mantiene para no romper a quien lo llame.
     reintentar_fallidas = seguir_ordenes
 
-    def levantar_orden(self, proveedor_id: str, orden_id: str, motivo: str) -> dict:
-        """Firma el levantamiento con el juez de turno y lo envía al proveedor."""
-        firma = self.jueces.firmar_levantamiento(orden_id, motivo)
+    def levantar_orden(self, proveedor_id: str, orden_id: str, motivo: str, juez_id: str) -> dict:
+        """Firma el levantamiento en nombre del juez que lo aprobó (si sigue de turno) y lo envía."""
+        firma = self.jueces.firmar_levantamiento(orden_id, motivo, juez_id)
         resp = pedir(self.base, f"/proveedores/{proveedor_id}/ordenes/{orden_id}/levantar", firma, "POST")
         with self._lock:
             local = self.ordenes.get(f"{proveedor_id}:{orden_id}")
