@@ -191,7 +191,8 @@ class Asistente:
                 puntos.append(f"No conviene bloquear la IP: {e.motivo_riesgo}")
             puntos.append(f"Por eso se propone bloquear solo el dominio {e.objetivo_recomendado}.")
             revisar.append("Que la orden sea por dominio y no por IP (evita el daño colateral).")
-            resumen = "Bloquear por dominio: la IP es compartida y cortarla afectaría a terceros."
+            resumen = ("Bloquear por dominio: la IP es compartida y cortarla afectaría a terceros." if e.otros_sitios_en_la_ip
+                       else "Bloquear por dominio: no se puede descartar que la IP sirva a terceros.")
         else:
             puntos.append("La IP solo sirve a este sitio pirata" + (f" y a sus espejos ({', '.join(espejos)})" if espejos else "")
                           + ": bloquear la IP lo corta entero sin afectar a nadie más.")
@@ -211,11 +212,14 @@ class Asistente:
         r, orden = d.reclamo, d.orden_afectada or {}
         objetivo = f"{orden.get('tipo', '')} {orden.get('objetivo', '')}".strip()
         if d.propuesta == "levantar_y_precisar":
-            si_aprobas = (f"Se levanta el bloqueo {objetivo} en todos los proveedores y se reemplaza por un bloqueo del "
-                          "dominio pirata real: el pirata sigue bloqueado y el reclamante vuelve a funcionar.")
+            si_aprobas = (f"Se levanta el bloqueo {objetivo} en todos los proveedores y, si el DNS pasivo identifica el "
+                          "dominio pirata que compartía la IP, se reemplaza por un bloqueo de ese dominio.")
         elif d.propuesta == "levantar":
             si_aprobas = f"Se levanta el bloqueo {objetivo} en todos los proveedores."
         else:
             si_aprobas = "El bloqueo se mantiene tal como está."
+        revisar = (["Después de aprobar, que en Órdenes en proveedores aparezca el bloqueo por dominio: si no se "
+                    "identificó el dominio pirata, el pirata queda sin bloquear."]
+                   if d.propuesta == "levantar_y_precisar" else [])
         return {"resumen": d.razon, "puntos": [f"Reclama {r['dominio']} vía {r['proveedor']}.", si_aprobas],
-                "revisar": [], "sugerencia": "La plataforma propone; vos decidís."}
+                "revisar": revisar, "sugerencia": "La plataforma propone; vos decidís."}

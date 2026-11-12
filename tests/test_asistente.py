@@ -62,7 +62,9 @@ class TestAsistente(ConSimulador):
         estado = self.asis.evaluar(est(minuto=2.2), list(self.mesa.expedientes.values()), [dr], [])
         self.assertEqual(estado["alertas"][0]["clave"], "reclamo-R-1")
         self.assertIn("R-1", estado["siguiente"]["texto"])
-        self.assertIn("dominio pirata real", " ".join(Asistente.explicar_reclamo(dr)["puntos"]))
+        exp = Asistente.explicar_reclamo(dr)
+        self.assertIn("si el DNS pasivo identifica", " ".join(exp["puntos"]))
+        self.assertIn("queda sin bloquear", " ".join(exp["revisar"]))
 
     def test_ordenes_rechazadas_fallidas_y_sin_confirmar(self):
         g = grupo("EXP-1", {"grande": ("rechazada", "ip"), "chico": ("fallida", "dominio")})
@@ -93,6 +95,10 @@ class TestAsistente(ConSimulador):
         dom = Asistente.explicar_expediente(self.builder.construir(deteccion(host="live.otro.test", ip="198.51.100.20")))
         self.assertIn("dominio", dom["resumen"])
         self.assertIn("panaderia.test", " ".join(dom["puntos"]))
+        self.assertIn("afectaría a terceros", dom["resumen"])
+        sin_dns = Asistente.explicar_expediente(self.builder.construir(deteccion(host="live.nuevo.test", ip="10.9.9.9")))
+        self.assertIn("no se puede descartar", sin_dns["resumen"])
+        self.assertIn("Sin datos de DNS pasivo", " ".join(sin_dns["puntos"]))
 
     def test_audita_cada_alerta_una_sola_vez_y_no_decide(self):
         self._pendiente()
