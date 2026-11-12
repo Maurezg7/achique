@@ -5,20 +5,22 @@
                   que el juez de turno apruebe o rechace, y los reclamos con la propuesta de la plataforma.
 - `/transparencia` Registro público de solo lectura: qué se bloqueó, cuándo, por orden de quién y hasta
                   cuándo. Sin evidencia interna. También en JSON: `/transparencia.json`.
+- `/static/…`     Página base, estilos, script y logos de `web/`.
 
 Las decisiones se cargan en la Mesa; el hilo de despacho (despacho.py) recién firma y envía cuando ve
 una decisión "aprobada". El juez nunca ve ni toca la clave de firma.
 """
-import base64
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from auditoria import verificar_cadena
-from evidencia import pedir
-from mesa import Mesa
+from .auditoria import verificar_cadena
+from .evidencia import pedir
+from . import LEMA, NOMBRE
+from .mesa import Mesa
 
 ICONO_RED = {"x": "𝕏", "telegram": "✈", "discord": "◆"}
 # Qué estado mostrar por proveedor cuando tiene varias órdenes del mismo bloqueo (reintentos, reemplazos).
@@ -26,30 +28,15 @@ RANGO_ESTADO = {"aplicada": 6, "recibida": 5, "enviada": 5, "vencida": 4, "levan
                 "rechazada": 1, "reemplazada": 0}
 
 
-NOMBRE_APP = "Tarjeta Roja"
-LEMA_APP = "Bloqueo judicial de señal pirata en vivo"
 LIGA = "Liga de Fútbol Argentino"   # liga ficticia de la demo (alusión, no es la AFA)
-# Logo de la app: tarjeta roja con la señal de transmisión tachada.
-LOGO_APP = """<svg viewBox="0 0 64 64" aria-label="Tarjeta Roja"><defs><linearGradient id="tr-g" x1="0" y1="0" x2="1" y2="1">
-<stop offset="0" stop-color="#ff5a66"/><stop offset="1" stop-color="#b8001a"/></linearGradient></defs>
-<rect x="13" y="7" width="38" height="50" rx="6" fill="#000" opacity=".35" transform="rotate(12 34 34)"/>
-<rect x="12" y="5" width="38" height="50" rx="6" fill="url(#tr-g)" transform="rotate(12 31 30)"/>
-<g transform="rotate(12 31 30)" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round">
-<path d="M21 25a14 14 0 0 1 20 0"/><path d="M25.5 30a7.5 7.5 0 0 1 11 0"/><path d="M19 43L43 17"/></g>
-<circle cx="31.6" cy="35.2" r="2.4" fill="#fff"/></svg>"""
-# Escudo de la liga ficticia (alusión a la AFA, sin copiar su logo): celeste y blanco, sol y tres estrellas.
-_ESTRELLA = "M0,-4 1.2,-1.3 4,-1.2 1.8,.6 2.5,3.4 0,1.8 -2.5,3.4 -1.8,.6 -4,-1.2 -1.2,-1.3Z"
-ESCUDO_LIGA = f"""<svg viewBox="0 0 64 70" aria-label="{LIGA}"><defs><clipPath id="lfa-c"><path d="M10 18h44v22c0 14-10 22-22 27C20 62 10 54 10 40Z"/></clipPath></defs>
-<path d="M8 16h48v24c0 16-11 24-24 29C19 64 8 56 8 40Z" fill="#0d2a4a" stroke="#e8c15a" stroke-width="2.5"/>
-<g clip-path="url(#lfa-c)"><rect x="8" y="16" width="48" height="54" fill="#fff"/>
-<rect x="13" y="16" width="7" height="54" fill="#6cace4"/><rect x="28.5" y="16" width="7" height="54" fill="#6cace4"/><rect x="44" y="16" width="7" height="54" fill="#6cace4"/>
-<rect x="8" y="31" width="48" height="15" fill="#0d2a4a"/></g>
-<text x="32" y="43" text-anchor="middle" font-family="Oswald,'DejaVu Sans Condensed',sans-serif" font-weight="800" font-size="13" fill="#fff" letter-spacing="1">LFA</text>
-<circle cx="32" cy="8" r="4.2" fill="#f6b40e"/><circle cx="32" cy="8" r="6.8" fill="none" stroke="#f6b40e" stroke-width="1.8" stroke-dasharray="1.6 1.9"/>
-<path d="{_ESTRELLA}" fill="#e8c15a" transform="translate(17 9)"/><path d="{_ESTRELLA}" fill="#e8c15a" transform="translate(47 9)"/>
-<path d="{_ESTRELLA}" fill="#e8c15a" transform="translate(32 58) scale(.8)"/></svg>"""
-FAVICON = "data:image/svg+xml;base64," + base64.b64encode(
-    LOGO_APP.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ').encode("utf-8")).decode("ascii")
+# Página, estilos, script y logos viven en web/ (servidos en /static/). Los logos también se incrustan
+# en el fragmento en vivo: logo.svg (tarjeta roja con la señal tachada) y liga.svg (escudo ficticio).
+WEB = Path(__file__).resolve().parent / "web"
+ESTATICOS = {"estilos.css": "text/css; charset=utf-8", "app.js": "application/javascript; charset=utf-8",
+             "logo.svg": "image/svg+xml", "liga.svg": "image/svg+xml"}
+PAGINA_BASE = (WEB / "index.html").read_text(encoding="utf-8")
+LOGO_APP = (WEB / "logo.svg").read_text(encoding="utf-8")
+ESCUDO_LIGA = (WEB / "liga.svg").read_text(encoding="utf-8")
 
 # Marcador ilustrativo para la demo (minutos de simulación). No interviene en ninguna decisión ni orden.
 GOLES_ILUSTRATIVOS = ((23, "local"), (71, "visitante"), (92, "local"))
@@ -112,11 +99,13 @@ class JuezHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         partes = [p for p in urlparse(self.path).path.split("/") if p]
         if not partes:
-            return self._responder(_PAGINA_BASE.replace("__TITULO__", "Mesa del juez").replace("__FRAG__", "/fragmento"))
+            return self._responder(PAGINA_BASE.replace("__TITULO__", "Mesa del juez").replace("__FRAG__", "/fragmento"))
         if partes == ["fragmento"]:
             return self._responder(self._fragmento())
+        if len(partes) == 2 and partes[0] == "static" and partes[1] in ESTATICOS:  # lista blanca: sin rutas arbitrarias
+            return self._responder((WEB / partes[1]).read_text(encoding="utf-8"), tipo=ESTATICOS[partes[1]])
         if partes == ["transparencia"]:
-            return self._responder(_PAGINA_BASE.replace("__TITULO__", "Registro público de bloqueos")
+            return self._responder(PAGINA_BASE.replace("__TITULO__", "Registro público de bloqueos")
                                    .replace("__FRAG__", "/transparencia/fragmento"))
         if partes == ["transparencia", "fragmento"]:
             return self._responder(self._fragmento_transparencia())
@@ -217,7 +206,7 @@ class JuezHandler(BaseHTTPRequestHandler):
         vivo = "off" if est["finalizado"] else ""
         return f"""
 <header class="top">
- <div class="brand"><div class="logo">{LOGO_APP}</div><div><b>{NOMBRE_APP}</b>
+ <div class="brand"><div class="logo">{LOGO_APP}</div><div><b>{NOMBRE}</b>
    <span class="seccion">{_escape(titulo)}</span><small>{_escape(subtitulo)}</small></div></div>
  <div class="centro">
  <div class="torneo"><span class="liga">{ESCUDO_LIGA}</span><b>{_escape(LIGA.upper())}</b><i>Torneo 2026 · Fecha 12 · ficticio</i></div>
@@ -318,7 +307,7 @@ class JuezHandler(BaseHTTPRequestHandler):
         return f"""
 <div id="meta" data-pendientes="{_escape(','.join(d.expediente.id for d in pendientes))}"
      data-reclamos="{_escape(','.join(d.reclamo['id'] for d in reclamos_pend))}"></div>
-{self._marcador(est, "Mesa del juez", LEMA_APP, derecha)}
+{self._marcador(est, "Mesa del juez", LEMA, derecha)}
 {self._linea_de_tiempo(est, todos)}
 {sin_turno}
 {self._relato(est, todos, grupos)}
@@ -449,259 +438,6 @@ class JuezHandler(BaseHTTPRequestHandler):
 para no ofrecer un mapa para evadir el próximo bloqueo. Los bloqueos por IP vencen solos al terminar el partido.</p>
 <div class="tabla"><table><thead><tr><th>Bloqueo</th><th>Expediente</th><th>Ordenado por</th>
 <th>Desde</th><th>Hasta</th><th>Estado por proveedor</th></tr></thead><tbody>{cuerpo}</tbody></table></div>"""
-
-
-_PAGINA_BASE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tarjeta Roja · __TITULO__</title>
-<link rel="icon" href="__FAVICON__">
-<style>
- :root{--bg:#060d0a;--bg2:#0c1320;--card:rgba(16,24,30,.84);--borde:rgba(130,170,160,.16);--txt:#eef5f1;--sub:#8fa39b;
-       --rojo:#ff5d6c;--verde:#2fd08a;--azul:#4da3ff;--ambar:#ffb547;--violeta:#a78bfa;
-       --boca:#0b3d91;--oro:#f6c700;--river:#e2141f;--display:"Oswald","Bebas Neue","Barlow Condensed","Roboto Condensed","DejaVu Sans Condensed",Impact,sans-serif}
- *{box-sizing:border-box}
- body{font-family:Inter,"Noto Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--txt);margin:0;padding:18px clamp(14px,3vw,36px) 48px;
-      font-size:15px;min-height:100vh;background-attachment:fixed;
-      background:radial-gradient(900px 420px at 50% -120px,rgba(47,208,138,.20),transparent 70%),
-                 radial-gradient(700px 700px at 50% 52%,transparent 179px,rgba(255,255,255,.035) 180px,rgba(255,255,255,.035) 182px,transparent 183px),
-                 linear-gradient(90deg,transparent calc(50% - 1px),rgba(255,255,255,.03) calc(50% - 1px),rgba(255,255,255,.03) calc(50% + 1px),transparent calc(50% + 1px)),
-                 repeating-linear-gradient(90deg,rgba(47,208,138,.045) 0 110px,rgba(47,208,138,.015) 110px 220px),var(--bg)}
- h2,.kpi b,.relato-tit{font-family:var(--display)}
- .marcador{position:relative;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:0;min-width:640px;
-           background:linear-gradient(180deg,#121a22,#0a1016);border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:visible;
-           box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 30px rgba(0,0,0,.45)}
- .equipo{display:flex;align-items:center;gap:14px;padding:12px 18px;font-family:var(--display);text-transform:uppercase;letter-spacing:.04em}
- .equipo b{font-size:24px;font-weight:700;white-space:nowrap}
- .equipo.local{justify-content:flex-end;border-radius:16px 0 0 16px;background:linear-gradient(90deg,transparent,rgba(11,61,145,.55))}
- .equipo.local b{color:#fff;text-shadow:0 0 18px rgba(246,199,0,.35)}
- .equipo.visit{justify-content:flex-start;border-radius:0 16px 16px 0;background:linear-gradient(270deg,transparent,rgba(226,20,31,.45))}
- .escudo{width:46px;height:54px;display:grid;place-items:center;clip-path:polygon(0 0,100% 0,100% 62%,50% 100%,0 62%);
-         font:800 15px var(--display);letter-spacing:.02em;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));flex:0 0 auto}
- .escudo span{margin-top:-6px}
- .escudo.azul{background:linear-gradient(180deg,var(--boca) 0 36%,var(--oro) 36% 60%,var(--boca) 60%);color:#fff}
- .escudo.azul span{color:#fff;text-shadow:0 1px 2px #000}
- .escudo.rojo{background:linear-gradient(135deg,#fff 0 38%,var(--river) 38% 62%,#fff 62%);color:#111}
- .escudo.rojo span{background:rgba(255,255,255,.85);padding:0 3px;border-radius:3px}
- .tanteador{display:flex;align-items:center;gap:10px;padding:6px 22px;background:#05080b;height:100%;
-            font:700 46px/1 var(--display);font-variant-numeric:tabular-nums;border-left:1px solid rgba(255,255,255,.08);border-right:1px solid rgba(255,255,255,.08)}
- .tanteador i{font-style:normal;color:var(--sub);font-size:30px}
- .reloj{position:absolute;left:50%;top:100%;transform:translate(-50%,-6px);display:flex;align-items:center;gap:10px;white-space:nowrap;
-        background:var(--verde);color:#03170d;padding:4px 14px;border-radius:0 0 10px 10px;font:700 15px var(--display);letter-spacing:.06em;
-        box-shadow:0 6px 16px rgba(47,208,138,.3)}
- .reloj b{font-size:19px}.reloj small{color:#0b3a24;font:600 11px Inter,sans-serif;letter-spacing:0;display:inline}
- .reloj .live,.reloj .live.off{color:#03170d;margin:0;font-size:11px}.reloj .live i{background:#c4001a}
- .marcador.gol .tanteador span{animation:golazo .6s ease-in-out infinite alternate}
- @keyframes golazo{to{color:var(--oro);transform:scale(1.15)}}
- .festejo{position:absolute;left:50%;top:-14px;transform:translateX(-50%);padding:3px 14px;border-radius:8px;font:700 15px var(--display);
-          letter-spacing:.08em;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.5)}
- .f-local{background:var(--oro);color:var(--boca)}.f-visitante{background:var(--river);color:#fff}
- .timeline{background:var(--card);border:1px solid var(--borde);border-radius:14px;padding:16px 20px 10px;margin:24px 0 14px}
- .tl-track{position:relative;height:12px;border-radius:6px;background:repeating-linear-gradient(90deg,rgba(47,208,138,.16) 0 4%,rgba(47,208,138,.09) 4% 8%)}
- .tl-seg.et{position:absolute;top:0;height:100%;background:repeating-linear-gradient(45deg,rgba(255,255,255,.08) 0 5px,transparent 5px 10px);border-radius:3px}
- .tl-prog{position:absolute;inset:0 auto 0 0;border-radius:6px;background:linear-gradient(90deg,rgba(47,208,138,.55),var(--verde));transition:width 1.4s linear}
- .tl-now{position:absolute;top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:#fff;
-         box-shadow:0 0 0 4px rgba(47,208,138,.35),0 0 16px rgba(255,255,255,.6);transition:left 1.4s linear}
- .tl-now:after{content:"⚽";position:absolute;inset:0;display:grid;place-items:center;font-size:14px;line-height:1}
- .mk{position:absolute;transform:translateX(-50%)}
- .mk.det{top:-7px;width:4px;height:26px;border-radius:2px;background:var(--azul);box-shadow:0 0 8px var(--azul)}
- .mk.det.riesgo{background:var(--ambar);box-shadow:0 0 8px var(--ambar)}
- .mk.gol{top:-26px;font-size:15px}.mk.turno{top:15px;font-size:13px;color:var(--violeta)}
- .tl-labels{position:relative;height:18px;margin-top:10px;font:600 11px var(--display);color:var(--sub);letter-spacing:.08em;text-transform:uppercase}
- .tl-labels span{position:absolute;transform:translateX(-50%)}.tl-labels span:first-child{transform:none}.tl-labels span:last-child{transform:translateX(-100%)}
- .tl-ley{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--sub);margin-top:6px}
- .tl-ley i{display:inline-block;width:4px;height:12px;border-radius:2px;margin-right:-8px}.l-det{background:var(--azul)}.l-riesgo{background:var(--ambar)}
- .tl-ley b{font-weight:400;margin-right:-8px}
- .relato{display:flex;align-items:stretch;gap:12px;margin-bottom:16px;overflow:hidden}
- .relato-tit{flex:0 0 auto;display:grid;place-items:center;padding:0 14px;background:var(--river);color:#fff;font-weight:700;letter-spacing:.08em;
-             border-radius:10px;font-size:14px;writing-mode:horizontal-tb}
- .evs{display:flex;gap:10px;overflow:hidden;flex:1;mask-image:linear-gradient(90deg,#000 85%,transparent)}
- .ev{flex:0 0 auto;display:flex;gap:8px;align-items:center;background:var(--card);border:1px solid var(--borde);border-radius:10px;padding:8px 12px;font-size:13px;
-     white-space:nowrap}
- .ev b{font-family:var(--display);color:var(--verde);font-size:15px}
- .ev-gol{border-color:rgba(246,199,0,.5);background:rgba(246,199,0,.08)}.ev-det{border-color:rgba(77,163,255,.35)}
- .ev-blq{border-color:rgba(47,208,138,.4)}.ev-turno{border-color:rgba(167,139,250,.45)}
- a{color:var(--azul);text-decoration:none}
- small{color:var(--sub);display:block;font-size:12.5px;font-weight:400}
- em{font-style:normal;color:var(--sub);font-weight:600;margin-left:8px;background:rgba(255,255,255,.06);padding:1px 9px;border-radius:20px;font-size:13px}
- code{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;color:#a8d4ff;background:rgba(77,163,255,.1);padding:1px 7px;border-radius:6px;font-size:12.5px;word-break:break-all}
- .top{display:grid;grid-template-columns:1fr auto 1fr;gap:24px;align-items:center;margin-bottom:18px;padding:18px 22px 30px;
-      background:linear-gradient(180deg,rgba(18,30,28,.9),rgba(10,16,18,.9));border:1px solid var(--borde);border-radius:18px;
-      backdrop-filter:blur(10px);box-shadow:0 10px 40px rgba(0,0,0,.35)}
- .brand{display:flex;gap:14px;align-items:center}.brand b{font-size:19px;display:block;letter-spacing:-.01em}
- .logo{width:54px;height:54px;border-radius:15px;display:grid;place-items:center;padding:5px;flex:0 0 auto;
-       background:radial-gradient(circle at 30% 20%,#25323d,#0b1116);border:1px solid rgba(255,90,102,.35);box-shadow:0 6px 22px rgba(226,20,31,.3)}
- .logo svg,.liga svg{width:100%;height:100%;display:block}
- .brand b{font-family:var(--display);font-size:25px;text-transform:uppercase;letter-spacing:.05em;line-height:1;
-          background:linear-gradient(90deg,#fff,#ffb3b9);-webkit-background-clip:text;background-clip:text;color:transparent}
- .seccion{display:inline-block;margin:4px 0 2px;font:700 11px var(--display);letter-spacing:.12em;text-transform:uppercase;
-          color:#ff8a94;background:rgba(226,20,31,.14);border:1px solid rgba(226,20,31,.3);padding:1px 8px;border-radius:6px}
- .centro{display:flex;flex-direction:column;align-items:center;gap:8px}
- .torneo{display:flex;align-items:center;gap:8px;font-family:var(--display);text-transform:uppercase;letter-spacing:.1em}
- .torneo .liga{width:34px;height:37px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))}
- .torneo b{font-size:13px;color:#cfe3f5}.torneo i{font-style:normal;font-size:11px;color:var(--sub)}
- .torneo i:before{content:"·";margin-right:8px;color:#6cace4}
- .live{display:inline-flex;gap:8px;align-items:center;color:var(--rojo);font-weight:800;letter-spacing:.16em;font-size:11px;margin-bottom:4px}
- .live i{width:8px;height:8px;border-radius:50%;background:var(--rojo);box-shadow:0 0 0 0 rgba(255,93,108,.7);animation:pulso 1.4s infinite}
- .live.off{color:var(--sub)}.live.off i{animation:none;background:var(--sub)}
- @keyframes pulso{70%{box-shadow:0 0 0 10px rgba(255,93,108,0)}100%{box-shadow:0 0 0 0 rgba(255,93,108,0)}}
- .duty{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}.duty b{font-size:17px}
- .chain{font-size:12px;padding:3px 10px;border-radius:20px;font-weight:600}
- .chain.ok{background:rgba(47,208,138,.12);color:var(--verde)}.chain.bad{background:rgba(255,93,108,.15);color:var(--rojo)}
- .pub{font-size:12.5px;font-weight:600}
- .banner{background:rgba(255,181,71,.12);border:1px solid rgba(255,181,71,.35);color:var(--ambar);padding:12px 16px;border-radius:12px;margin-bottom:16px;font-weight:600}
- .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:22px}
- .kpi{background:var(--card);border:1px solid var(--borde);border-radius:16px;padding:14px 18px;position:relative;overflow:hidden}
- .kpi:before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--sub);opacity:.5}
- .kpi b{font-size:30px;line-height:1.15;display:block;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
- .kpi b small{display:inline;font-size:16px}
- .kpi span{color:var(--sub);font-size:12.5px;font-weight:500}
- .kpi.rojo b{color:var(--rojo)}.kpi.rojo:before{background:var(--rojo);opacity:1}
- .kpi.verde b{color:var(--verde)}.kpi.verde:before{background:var(--verde);opacity:1}
- .kpi.azul b{color:var(--azul)}.kpi.azul:before{background:var(--azul);opacity:1}
- .kpi.ambar b{color:var(--ambar)}.kpi.ambar:before{background:var(--ambar);opacity:1}
- .kpi.violeta b{color:var(--violeta)}.kpi.violeta:before{background:var(--violeta);opacity:1}
- .cols{display:grid;grid-template-columns:minmax(0,2.1fr) minmax(320px,1fr);gap:24px;align-items:start}
- aside{position:sticky;top:16px}
- h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:#c9d5e6;margin:0 0 12px;display:flex;align-items:center}
- section{margin-bottom:26px}
- .dot{width:9px;height:9px;border-radius:50%;margin-right:10px;background:var(--azul);box-shadow:0 0 12px currentColor}
- .dot.rojo{background:var(--rojo)}.dot.ambar{background:var(--ambar)}.dot.verde{background:var(--verde)}
- .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;align-items:start}
- .card{background:var(--card);border:1px solid var(--borde);border-radius:18px;padding:18px 20px;backdrop-filter:blur(8px);
-       box-shadow:0 8px 30px rgba(0,0,0,.25)}
- .nuevo{animation:entra .4s ease-out}
- .festejo.nuevo{animation:pop .45s ease-out}
- @keyframes pop{from{opacity:0;transform:translateX(-50%) scale(.6)}}
- @keyframes entra{from{opacity:0;transform:translateY(6px)}}
- .card.riesgo{border-color:rgba(255,93,108,.55);box-shadow:0 0 0 1px rgba(255,93,108,.25),0 8px 30px rgba(255,93,108,.08)}
- .card.reclamo{border-color:rgba(255,181,71,.55)}
- .card h3{margin:8px 0 4px;font-size:21px;letter-spacing:-.01em;word-break:break-all}
- .meta{color:var(--sub);font-size:12.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
- .pill{background:rgba(77,163,255,.14);color:#9fcaff;border-radius:20px;padding:2px 10px;font-weight:700;font-size:11.5px}
- .pill.gris{background:rgba(255,255,255,.07);color:var(--sub)}.pill.ambar{background:rgba(255,181,71,.15);color:var(--ambar)}
- .srv{color:var(--sub);font-size:13px;margin:4px 0}
- .marca{font-size:13.5px;color:var(--verde);margin:8px 0}
- .alerta,.limpio{border-radius:12px;padding:10px 13px;margin:10px 0;font-size:13px}
- .alerta{background:rgba(255,93,108,.1);border:1px solid rgba(255,93,108,.3);color:#ffb3ba}
- .alerta b,.limpio b{display:block;font-size:13.5px;margin-bottom:2px}
- .alerta b{color:var(--rojo)}.limpio{background:rgba(47,208,138,.08);border:1px solid rgba(47,208,138,.25);color:#a9ecc9}.limpio b{color:var(--verde)}
- .sitios{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.sitios span{background:rgba(255,93,108,.14);border-radius:6px;padding:1px 7px;font-size:11.5px}
- .pedido{background:rgba(255,255,255,.035);border:1px dashed var(--borde);border-radius:12px;padding:10px 13px;margin:10px 0}
- .pedido>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
- .vence{margin-left:auto;color:var(--sub);font-size:12px}
- .razon{margin:6px 0 0;font-size:13px;color:#c3cfe0}
- blockquote{margin:8px 0;padding:8px 12px;border-left:3px solid var(--ambar);background:rgba(255,181,71,.06);border-radius:0 8px 8px 0;color:#e7d8bf;font-size:13.5px}
- .tipo{display:inline-block;color:#1a1200;background:var(--ambar);font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.08em;padding:2px 8px;border-radius:6px}
- .t-ip{background:var(--violeta);color:#140b2e}.t-dominio{background:var(--azul);color:#04162b}
- details{margin:8px 0;font-size:13px}
- summary{cursor:pointer;color:var(--azul);font-weight:600;list-style:none}summary::before{content:"▸ ";}
- details[open] summary::before{content:"▾ "}
- .checks{list-style:none;padding:0;margin:10px 0}.checks li{padding:3px 0 3px 22px;position:relative;color:#c9d5e6}
- .checks li:before{content:"✓";position:absolute;left:2px;color:var(--verde);font-weight:800}
- dl{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:8px 0}dt{color:var(--sub)}dd{margin:0;word-break:break-all}
- .promos{display:flex;flex-wrap:wrap;gap:6px}.promo{background:rgba(167,139,250,.14);color:#cbbcff;border-radius:6px;padding:1px 8px;font-size:12px}
- form{display:flex;gap:10px;margin-top:14px}
- .btn{flex:1;padding:13px;border:0;border-radius:12px;cursor:pointer;font-weight:800;font-size:15px;transition:.15s;font-family:inherit}
- .aprobar{background:linear-gradient(135deg,#2fd08a,#1fae70);color:#03170d;box-shadow:0 6px 18px rgba(47,208,138,.25)}
- .rechazar{background:rgba(255,93,108,.1);color:#ff9aa4;border:1px solid rgba(255,93,108,.3);flex:0 0 auto;padding:13px 18px}
- .btn:hover{filter:brightness(1.1);transform:translateY(-1px)}.btn:disabled{opacity:.5;cursor:wait;transform:none}
- .lista{display:flex;flex-direction:column;gap:9px}
- .item{background:var(--card);border:1px solid var(--borde);border-radius:14px;padding:11px 14px;font-size:13.5px}
- .item-top{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap}
- .item.fila{display:flex;gap:10px;align-items:center}
- .cob{height:4px;background:rgba(255,255,255,.07);border-radius:3px;margin:9px 0 5px;overflow:hidden}
- .cob div{height:100%;background:linear-gradient(90deg,var(--verde),#7cf0bb);transition:width .6s}
- .vacio{color:var(--sub);font-size:13.5px;padding:8px 2px}
- .vacio.grande{grid-column:1/-1;padding:44px;text-align:center;border:1px dashed var(--borde);border-radius:18px;display:flex;flex-direction:column;gap:6px;align-items:center}
- .vacio-ico{font-size:34px;opacity:.6}.vacio.grande b{color:var(--txt);font-size:17px}
- .nota{color:var(--sub);font-size:13px}
- .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
- .chip{font-size:11.5px;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.06);color:var(--sub);display:inline-flex;gap:6px;font-weight:600}
- .chip i{font-style:normal;font-weight:500;opacity:.85}
- .c-aplicada{background:rgba(47,208,138,.14);color:#6fe3ad}.c-recibida,.c-enviada{background:rgba(77,163,255,.14);color:#9fcaff}
- .c-fallida,.c-rechazada{background:rgba(255,93,108,.15);color:#ff9aa4}.c-reemplazada{opacity:.6}
- .c-vencida{background:rgba(255,255,255,.06);color:#b6c2d3}.c-levantada{background:rgba(255,181,71,.15);color:var(--ambar)}
- .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
- .b-aprobado,.b-despachado{background:rgba(47,208,138,.15);color:#6fe3ad}.b-rechazado{background:rgba(255,93,108,.15);color:#ff9aa4}
- .aviso{color:var(--sub);max-width:900px;margin:0 0 16px}
- .tabla{background:var(--card);border:1px solid var(--borde);border-radius:18px;overflow:auto}
- table{width:100%;border-collapse:collapse;font-size:13.5px}
- th{text-align:left;color:var(--sub);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:13px 16px;border-bottom:1px solid var(--borde)}
- td{padding:12px 16px;border-bottom:1px solid rgba(120,150,190,.08);vertical-align:top}
- tr:hover td{background:rgba(255,255,255,.02)}
- #toast{position:fixed;right:22px;bottom:22px;background:linear-gradient(135deg,var(--azul),var(--violeta));color:#fff;padding:14px 18px;
-        border-radius:14px;font-weight:700;box-shadow:0 12px 40px rgba(0,0,0,.45);transform:translateY(30px);opacity:0;
-        visibility:hidden;transition:.35s;z-index:9}
- #toast.show{transform:none;opacity:1;visibility:visible}
- #notif{position:fixed;left:22px;bottom:22px;background:var(--card);border:1px solid var(--borde);color:var(--txt);padding:9px 14px;border-radius:12px;cursor:pointer;font-size:13px}
- @media(max-width:1300px){.kpis{grid-template-columns:repeat(3,1fr)}.top{grid-template-columns:1fr auto}.top .brand{display:none}}
- @media(max-width:900px){.cols{grid-template-columns:1fr}.top{grid-template-columns:1fr;text-align:center}.brand{justify-content:center}
-   .marcador{min-width:0;width:100%}.equipo{padding:10px 8px;gap:8px}.equipo b{font-size:15px;white-space:normal}.escudo{width:34px;height:40px;font-size:12px}
-   .tanteador{font-size:34px;padding:6px 12px}.relato-tit{display:none}.tl-labels{font-size:9px}.tl-ley{display:none}
-   .duty{align-items:center;text-align:center}.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}aside{position:static}}
-</style></head><body>
-<div id="app"></div><div id="toast"></div>
-<button id="notif" hidden>🔔 Activar avisos</button>
-<script>
-// Una sola ventana en vivo: pide el contenido cada 1,5 s y lo reemplaza en su lugar (sin recargar la página).
-const FRAG = '__FRAG__', app = document.getElementById('app'), toast = document.getElementById('toast');
-let ultimo = '', ocupado = false, conocidos = null;
-function avisar(texto) {
-  toast.textContent = texto; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 4000);
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)(), o = ctx.createOscillator(), g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.setValueAtTime(.08, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + .35); o.start(); o.stop(ctx.currentTime + .35);
-  } catch (e) {}
-  if ('Notification' in window && Notification.permission === 'granted') new Notification('Mesa del juez', {body: texto});
-}
-function revisarNuevos() {
-  const meta = document.getElementById('meta'); if (!meta) return;
-  const ids = (meta.dataset.pendientes + ',' + meta.dataset.reclamos).split(',').filter(Boolean);
-  const nuevos = conocidos ? ids.filter(i => !conocidos.has(i)) : [];
-  conocidos = new Set([...(conocidos || []), ...ids]);
-  const pend = meta.dataset.pendientes.split(',').filter(Boolean).length;
-  document.title = (pend ? '(' + pend + ') ' : '') + 'Tarjeta Roja · Mesa del juez';
-  if (nuevos.length) avisar(nuevos.length === 1 ? 'Nuevo para decidir: ' + nuevos[0] : nuevos.length + ' nuevos para decidir');
-}
-async function refrescar() {
-  if (ocupado) return;
-  try {
-    const html = await (await fetch(FRAG, {cache: 'no-store'})).text();
-    if (html !== ultimo) {
-      const abiertos = [...document.querySelectorAll('details[open]')].map(d => d.id), y = window.scrollY;
-      const antes = new Set([...app.querySelectorAll('[data-k]')].map(e => e.dataset.k));
-      app.innerHTML = html; ultimo = html;
-      // Solo se anima lo que aparece por primera vez; lo demás se reemplaza sin parpadear.
-      app.querySelectorAll('[data-k]').forEach(e => { if (!antes.has(e.dataset.k)) e.classList.add('nuevo'); });
-      abiertos.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
-      window.scrollTo(0, y); revisarNuevos();
-    }
-  } catch (e) { /* el servidor puede estar reiniciando: reintenta */ }
-}
-document.addEventListener('submit', async ev => {
-  ev.preventDefault();
-  const boton = ev.submitter, form = ev.target, datos = new URLSearchParams();
-  if (boton && boton.name) datos.append(boton.name, boton.value);
-  if (boton && boton.value === 'rechazar') {
-    const motivo = prompt('Motivo del rechazo (queda en la auditoría):', '');
-    if (motivo === null) return;
-    datos.append('motivo', motivo);
-  }
-  ocupado = true;
-  form.querySelectorAll('button').forEach(b => b.disabled = true);
-  try { await fetch(form.action, {method: 'POST', body: datos, headers: {'X-Requested-With': 'fetch'}}); }
-  finally { ocupado = false; ultimo = ''; refrescar(); }
-});
-const nb = document.getElementById('notif');
-if (FRAG === '/fragmento' && 'Notification' in window && Notification.permission === 'default') {
-  nb.hidden = false; nb.onclick = () => Notification.requestPermission().then(() => nb.hidden = true);
-}
-refrescar(); setInterval(refrescar, 1500);
-</script></body></html>"""
-
-
-_PAGINA_BASE = _PAGINA_BASE.replace("__FAVICON__", FAVICON)
 
 
 def iniciar_servidor_juez(mesa: Mesa, base_simulador: str, puerto: int, despachador=None,

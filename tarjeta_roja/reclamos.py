@@ -15,9 +15,9 @@ import threading
 import time
 from typing import Set
 
-from despacho import INTERVALO_SEG, Despachador
-from evidencia import pedir
-from mesa import DecisionReclamo, Mesa
+from .despacho import INTERVALO_SEG, Despachador
+from .evidencia import pedir
+from .mesa import DecisionReclamo, Mesa
 
 
 class GestorReclamos:

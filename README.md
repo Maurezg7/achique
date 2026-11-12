@@ -22,7 +22,7 @@ completa en [`entrega/evaluacion_practica.txt`](entrega/evaluacion_practica.txt)
 | Daño colateral / falsos positivos | **0 / 0** (ni el licenciatario ni el VOD de otro partido) |
 | Bloqueos por IP activos después del partido | **0** |
 | Órdenes rechazadas / firmadas fuera de turno | **0 / 0** (hubo cambio de turno en el minuto 50) |
-| Cadena de auditoría | íntegra (`python3 auditoria.py entrega/auditoria_ejemplo.jsonl`) |
+| Cadena de auditoría | íntegra (`python3 -m tarjeta_roja.auditoria entrega/auditoria_ejemplo.jsonl`) |
 
 La recomendación IP/dominio coincidió en los 7 expedientes con la `bloqueo_recomendado` de la verdad del escenario.
 
@@ -41,7 +41,7 @@ cd desafio-futbol
 # Terminal 1: simulador oficial
 python3 simulador/servidor.py --escenario datos/escenario_practica.json --acelerar 30 --puerto 8000
 
-# Terminal 2: la plataforma
+# Terminal 2: Tarjeta Roja
 python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --puerto-juez 8090 \
     --juzgados datos/juzgados.json --log salida/auditoria.jsonl
 ```
@@ -56,15 +56,39 @@ python3 ../mi_solucion-futbol/plataforma.py --simulador http://localhost:8000 --
 Al terminar el partido (y los 5 min de gracia):
 
 ```bash
-python3 evaluacion/verificar.py --log salida/registro.jsonl              # métricas oficiales
-python3 ../mi_solucion-futbol/auditoria.py salida/auditoria.jsonl        # Cadena íntegra: SÍ
-python3 ../mi_solucion-futbol/evidencia.py salida/expedientes/EXP-2026-000001.json   # Expediente íntegro: SÍ
+python3 evaluacion/verificar.py --log salida/registro.jsonl     # métricas oficiales
+cd ../mi_solucion-futbol
+python3 -m tarjeta_roja.auditoria ../desafio-futbol/salida/auditoria.jsonl                     # Cadena íntegra: SÍ
+python3 -m tarjeta_roja.evidencia ../desafio-futbol/salida/expedientes/EXP-2026-000001.json    # Expediente íntegro: SÍ
 ```
+
+`python3 plataforma.py` es un atajo; también se puede correr con `python3 -m tarjeta_roja` desde la raíz del repo.
 
 Tests (sin dependencias, sin red):
 
 ```bash
 cd mi_solucion-futbol && python3 -m unittest discover -s tests -v
+```
+
+## Estructura
+
+```
+mi_solucion-futbol/
+├── plataforma.py              # atajo: python3 plataforma.py … (= python3 -m tarjeta_roja)
+├── tarjeta_roja/              # el paquete de la plataforma (solo biblioteca estándar)
+│   ├── __init__.py            # nombre y lema
+│   ├── __main__.py            # python3 -m tarjeta_roja
+│   ├── plataforma.py          # main(): hilos de ingesta, despacho, reclamos y servidor HTTP
+│   ├── evidencia.py           # expediente + verificación de sello (CLI)
+│   ├── mesa.py                # estado compartido y decisiones del juez
+│   ├── firmas.py              # HMAC con el juez de turno al firmar
+│   ├── despacho.py            # único que firma; envío, seguimiento y reintentos
+│   ├── reclamos.py            # verificación y resolución de reclamos
+│   ├── auditoria.py           # cadena de hashes (CLI de verificación)
+│   ├── servidor_juez.py       # Mesa del juez y registro público
+│   └── web/                   # index.html, estilos.css, app.js, logo.svg, liga.svg
+├── tests/                     # unittest con simulador falso en memoria
+└── entrega/                   # entregables del desafío (expediente, auditoría, propuesta, pitch)
 ```
 
 ## Arquitectura
@@ -80,7 +104,7 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
                             auditoria.py (cadena de hashes) ◄─────── cada paso ───┘
 ```
 
-| Archivo | Responsabilidad |
+| Módulo (`tarjeta_roja/`) | Responsabilidad |
 |---|---|
 | `evidencia.py` | Verifica la marca de agua contra `/partido`, descarta licenciatarios en su dominio y señales de otro partido, identifica servidor (host, IP, ASN, organización), evalúa riesgo colateral con DNS pasivo, calcula hashes y **sella** el expediente. |
 | `mesa.py` | Estado compartido con un único lock: expedientes (con re-detecciones), reclamos, decisiones del juez (auditadas) y estado de cada orden. |
@@ -88,7 +112,7 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 | `despacho.py` | Único que firma. Envía a cada proveedor en el tipo que acepta, sigue la orden hasta `aplicada` y `vencida`, reintenta fallidas (sin multiplicarlas) y firma levantamientos. |
 | `reclamos.py` | Verifica cada reclamo, propone mantener / levantar / levantar y precisar, y ejecuta lo que el juez aprobó en **todos** los proveedores afectados. |
 | `auditoria.py` | JSONL append-only encadenado por SHA-256; `verificar_cadena()` detecta cualquier edición o borrado. |
-| `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. |
+| `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. La página, estilos, script y logos están en `web/`. |
 | `plataforma.py` | Punto de entrada: hilos de ingesta, despacho, reclamos y servidor HTTP. |
 
 ## Decisiones clave
@@ -131,4 +155,4 @@ oficial `desafio-futbol` y no están copiados acá. Usamos un asistente de códi
 - `auditoria_ejemplo.jsonl` — auditoría completa de la corrida. **El día 3 se reemplazan por los del partido final.**
 - `evaluacion_practica.txt` — salida de `verificar.py`.
 - `propuesta_normativa.md` — propuesta normativa de 1 página.
-- `presentacion.pptx` y `guion_pitch.md` — pitch.
+- `presentacion.pptx` y `guion_pitch.md` — pitch. El video demo (`demo.mp4`) no se versiona: se sube a Hacki.

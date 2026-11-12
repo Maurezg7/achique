@@ -4,10 +4,10 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from auditoria import RegistroAuditoria
-from evidencia import Expediente, pedir
-from firmas import RegistroJueces
-from mesa import Mesa
+from .auditoria import RegistroAuditoria
+from .evidencia import Expediente, pedir
+from .firmas import RegistroJueces
+from .mesa import Mesa
 
 # Estados en los que una orden ya no necesita seguimiento.
 # "reemplazada": orden fallida que ya se reenvió con otro id; seguirla reintentando multiplicaría órdenes.

@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Dict, Tuple
 
-from evidencia import pedir
+from .evidencia import pedir
 
 
 def firmar(clave: str, mensaje: str) -> str:
