@@ -86,7 +86,7 @@ const PASOS = [
   {sel: 'main .card:not(.reclamo) .asis', t: 'Explicación del asistente', d: 'Abrila para leer en criollo por qué se propone IP o dominio y qué conviene revisar antes de firmar.'},
   {sel: 'main .card:not(.reclamo) .btn.aprobar', t: 'Aprobar y firmar', d: 'Con un clic firmás con tu clave de turno y la orden sale a cada proveedor en el tipo de bloqueo que acepta. "Rechazar" pide un motivo.'},
   {sel: '.card.reclamo', t: 'Reclamos', d: 'Si un sitio legítimo quedó bloqueado, aparece acá con la propuesta de la plataforma (levantar y precisar). Vos decidís.', falta: 'No hay reclamos ahora: aparecen acá cuando algún sitio reclame.'},
-  {sel: 'aside .lista', t: 'Órdenes en proveedores', d: 'El estado de cada bloqueo por proveedor (aplicada, fallida, vencida…) y el porcentaje de clientes cubiertos.'},
+  {sel: 'aside section:not(#asistente) .lista', t: 'Órdenes en proveedores', d: 'El estado de cada bloqueo por proveedor (aplicada, fallida, vencida…) y el porcentaje de clientes cubiertos.'},
   {sel: '.pub', t: 'Registro público', d: 'Vista de transparencia: qué se bloqueó, cuándo, por orden de quién y hasta cuándo, sin evidencia interna.'},
 ];
 const guia = document.getElementById('guia');
