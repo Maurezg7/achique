@@ -1,39 +1,110 @@
-"""Interfaz web del juez: una página HTML simple, sin frameworks, con autorefresh.
+"""Interfaz web del juez y registro público de transparencia, sin frameworks.
 
-Muestra el expediente completo (evidencia, riesgo colateral, hashes) para que el juez de
-turno apruebe o rechace, y los reclamos pendientes con la propuesta de la plataforma.
-Las decisiones se cargan en la Mesa; el hilo de despacho (despacho.py) recién firma y
-envía cuando ve una decisión "aprobada". El juez nunca ve ni toca la clave de firma.
+- `/`             Mesa del juez: una sola página en vivo (pide `/fragmento` cada 1,5 s y lo reemplaza
+                  en su lugar). Muestra el expediente completo (evidencia, riesgo colateral, hashes) para
+                  que el juez de turno apruebe o rechace, y los reclamos con la propuesta de la plataforma.
+- `/transparencia` Registro público de solo lectura: qué se bloqueó, cuándo, por orden de quién y hasta
+                  cuándo. Sin evidencia interna. También en JSON: `/transparencia.json`.
+
+Las decisiones se cargan en la Mesa; el hilo de despacho (despacho.py) recién firma y envía cuando ve
+una decisión "aprobada". El juez nunca ve ni toca la clave de firma.
 """
+import base64
+import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Optional
+from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from auditoria import verificar_cadena
 from evidencia import pedir
 from mesa import Mesa
 
+ICONO_RED = {"x": "𝕏", "telegram": "✈", "discord": "◆"}
+# Qué estado mostrar por proveedor cuando tiene varias órdenes del mismo bloqueo (reintentos, reemplazos).
+RANGO_ESTADO = {"aplicada": 6, "recibida": 5, "enviada": 5, "vencida": 4, "levantada": 3, "fallida": 2,
+                "rechazada": 1, "reemplazada": 0}
 
-def _escape(s: str) -> str:
+
+NOMBRE_APP = "Tarjeta Roja"
+LEMA_APP = "Bloqueo judicial de señal pirata en vivo"
+LIGA = "Liga de Fútbol Argentino"   # liga ficticia de la demo (alusión, no es la AFA)
+# Logo de la app: tarjeta roja con la señal de transmisión tachada.
+LOGO_APP = """<svg viewBox="0 0 64 64" aria-label="Tarjeta Roja"><defs><linearGradient id="tr-g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#ff5a66"/><stop offset="1" stop-color="#b8001a"/></linearGradient></defs>
+<rect x="13" y="7" width="38" height="50" rx="6" fill="#000" opacity=".35" transform="rotate(12 34 34)"/>
+<rect x="12" y="5" width="38" height="50" rx="6" fill="url(#tr-g)" transform="rotate(12 31 30)"/>
+<g transform="rotate(12 31 30)" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round">
+<path d="M21 25a14 14 0 0 1 20 0"/><path d="M25.5 30a7.5 7.5 0 0 1 11 0"/><path d="M19 43L43 17"/></g>
+<circle cx="31.6" cy="35.2" r="2.4" fill="#fff"/></svg>"""
+# Escudo de la liga ficticia (alusión a la AFA, sin copiar su logo): celeste y blanco, sol y tres estrellas.
+_ESTRELLA = "M0,-4 1.2,-1.3 4,-1.2 1.8,.6 2.5,3.4 0,1.8 -2.5,3.4 -1.8,.6 -4,-1.2 -1.2,-1.3Z"
+ESCUDO_LIGA = f"""<svg viewBox="0 0 64 70" aria-label="{LIGA}"><defs><clipPath id="lfa-c"><path d="M10 18h44v22c0 14-10 22-22 27C20 62 10 54 10 40Z"/></clipPath></defs>
+<path d="M8 16h48v24c0 16-11 24-24 29C19 64 8 56 8 40Z" fill="#0d2a4a" stroke="#e8c15a" stroke-width="2.5"/>
+<g clip-path="url(#lfa-c)"><rect x="8" y="16" width="48" height="54" fill="#fff"/>
+<rect x="13" y="16" width="7" height="54" fill="#6cace4"/><rect x="28.5" y="16" width="7" height="54" fill="#6cace4"/><rect x="44" y="16" width="7" height="54" fill="#6cace4"/>
+<rect x="8" y="31" width="48" height="15" fill="#0d2a4a"/></g>
+<text x="32" y="43" text-anchor="middle" font-family="Oswald,'DejaVu Sans Condensed',sans-serif" font-weight="800" font-size="13" fill="#fff" letter-spacing="1">LFA</text>
+<circle cx="32" cy="8" r="4.2" fill="#f6b40e"/><circle cx="32" cy="8" r="6.8" fill="none" stroke="#f6b40e" stroke-width="1.8" stroke-dasharray="1.6 1.9"/>
+<path d="{_ESTRELLA}" fill="#e8c15a" transform="translate(17 9)"/><path d="{_ESTRELLA}" fill="#e8c15a" transform="translate(47 9)"/>
+<path d="{_ESTRELLA}" fill="#e8c15a" transform="translate(32 58) scale(.8)"/></svg>"""
+FAVICON = "data:image/svg+xml;base64," + base64.b64encode(
+    LOGO_APP.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ').encode("utf-8")).decode("ascii")
+
+# Marcador ilustrativo para la demo (minutos de simulación). No interviene en ninguna decisión ni orden.
+GOLES_ILUSTRATIVOS = ((23, "local"), (71, "visitante"), (92, "local"))
+FIN_PRIMER_TIEMPO, FIN_ENTRETIEMPO = 45.0, 60.0
+
+
+def minuto_tv(m: float) -> str:
+    """Minuto como en la transmisión: 1T 0-45', entretiempo, 2T 46-90' (el simulador cuenta 105 con el ET)."""
+    if m < FIN_PRIMER_TIEMPO:
+        return f"{int(m) + 1}′"
+    if m < FIN_ENTRETIEMPO:
+        return "ET"
+    return f"{min(90, int(m - (FIN_ENTRETIEMPO - FIN_PRIMER_TIEMPO)) + 1)}′"
+
+
+def etapa(m: float, finalizado: bool) -> str:
+    if finalizado:
+        return "FINAL"
+    return "1T" if m < FIN_PRIMER_TIEMPO else ("ENTRETIEMPO" if m < FIN_ENTRETIEMPO else "2T")
+
+
+def _escape(s) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _corto(h: str, n: int = 12) -> str:
+    return f"{h[:n]}…{h[-6:]}" if h and len(h) > n + 6 else (h or "")
 
 
 class JuezHandler(BaseHTTPRequestHandler):
     mesa: Mesa
     base_simulador: str
+    proveedores: List[dict] = []
+    nombres_jueces: Dict[str, str] = {}
+    local, visitante = "Azul Juniors", "Rojo Plate"
+    turnos: List[dict] = []
 
     def log_message(self, formato, *args):
         pass
 
-    def _responder_html(self, cuerpo: str, estado: int = 200) -> None:
+    # --- respuestas ----------------------------------------------------------------------
+
+    def _responder(self, cuerpo: str, estado: int = 200, tipo: str = "text/html; charset=utf-8") -> None:
         b = cuerpo.encode("utf-8")
         self.send_response(estado)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", tipo)
         self.send_header("Content-Length", str(len(b)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(b)
 
     def _redirigir(self, destino: str = "/") -> None:
+        if self.headers.get("X-Requested-With") == "fetch":
+            self.send_response(204)  # decisión desde la página en vivo: no hay que navegar a ningún lado
+            return self.end_headers()
         self.send_response(303)
         self.send_header("Location", destino)
         self.end_headers()
@@ -41,145 +112,610 @@ class JuezHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         partes = [p for p in urlparse(self.path).path.split("/") if p]
         if not partes:
-            return self._responder_html(self._pagina())
-        self._responder_html("No encontrado", 404)
+            return self._responder(_PAGINA_BASE.replace("__TITULO__", "Mesa del juez").replace("__FRAG__", "/fragmento"))
+        if partes == ["fragmento"]:
+            return self._responder(self._fragmento())
+        if partes == ["transparencia"]:
+            return self._responder(_PAGINA_BASE.replace("__TITULO__", "Registro público de bloqueos")
+                                   .replace("__FRAG__", "/transparencia/fragmento"))
+        if partes == ["transparencia", "fragmento"]:
+            return self._responder(self._fragmento_transparencia())
+        if partes == ["transparencia.json"]:
+            return self._responder(json.dumps(self.mesa.vista_transparencia(), ensure_ascii=False, indent=2),
+                                   tipo="application/json; charset=utf-8")
+        self._responder("No encontrado", 404)
 
     def do_POST(self) -> None:
         largo = int(self.headers.get("Content-Length", "0"))
         cuerpo = parse_qs(self.rfile.read(largo).decode("utf-8"))
         partes = [p for p in urlparse(self.path).path.split("/") if p]
-
-        if len(partes) == 3 and partes[0] == "expedientes" and partes[2] == "decidir":
+        if len(partes) == 3 and partes[0] in ("expedientes", "reclamos") and partes[2] == "decidir":
             aprobar = cuerpo.get("decision", [""])[0] == "aprobar"
-            juez_id = self._juez_de_turno()
-            self.mesa.decidir_expediente(partes[1], aprobar, juez_id, cuerpo.get("motivo", [""])[0])
+            juez_id, minuto = self._juez_de_turno()
+            if juez_id is None:
+                return self._redirigir()  # sin juez de turno nadie puede decidir ni firmar
+            if partes[0] == "expedientes":
+                self.mesa.decidir_expediente(partes[1], aprobar, juez_id, cuerpo.get("motivo", [""])[0], minuto)
+            else:
+                self.mesa.decidir_reclamo(partes[1], aprobar, juez_id)
             return self._redirigir()
+        self._responder("No encontrado", 404)
 
-        if len(partes) == 3 and partes[0] == "reclamos" and partes[2] == "decidir":
-            aprobar = cuerpo.get("decision", [""])[0] == "aprobar"
-            juez_id = self._juez_de_turno()
-            self.mesa.decidir_reclamo(partes[1], aprobar, juez_id)
-            return self._redirigir()
-
-        self._responder_html("No encontrado", 404)
-
-    def _juez_de_turno(self) -> str:
-        try:
-            de_turno = pedir(self.base_simulador, "/estado")["jueces_de_turno"]
-            return de_turno[0] if de_turno else "sin-turno"
-        except Exception:
-            return "desconocido"
-
-    def _pagina(self) -> str:
+    def _juez_de_turno(self):
         try:
             estado = pedir(self.base_simulador, "/estado")
-            minuto, juez_turno = estado["minuto_actual"], ", ".join(estado["jueces_de_turno"]) or "ninguno"
+            de_turno = estado["jueces_de_turno"]
+            return (de_turno[0] if de_turno else None), estado.get("minuto_actual")
         except Exception:
-            minuto, juez_turno = "?", "?"
+            return None, None
 
-        pendientes = self.mesa.pendientes_expedientes()
-        decididos = sorted(
-            [d for d in self.mesa.expedientes.values() if d.estado != "pendiente"],
-            key=lambda d: d.decidido_min or 0, reverse=True,
-        )[:15]
-        reclamos_pend = self.mesa.pendientes_reclamos()
+    def _estado_simulador(self) -> dict:
+        try:
+            estado = pedir(self.base_simulador, "/estado")
+            return {"minuto": float(estado["minuto_actual"]), "fin": float(estado.get("fin_min", 105)),
+                    "turno": estado["jueces_de_turno"], "finalizado": bool(estado.get("finalizado"))}
+        except Exception:
+            return {"minuto": 0.0, "fin": 105.0, "turno": [], "finalizado": False}
 
-        filas_pendientes = "".join(self._fila_expediente(d) for d in pendientes) or \
-            "<tr><td colspan=7 class='vacio'>Sin expedientes pendientes.</td></tr>"
-        filas_decididos = "".join(self._fila_decidida(d) for d in decididos) or \
-            "<tr><td colspan=4 class='vacio'>Todavía no se decidió ninguno.</td></tr>"
-        filas_reclamos = "".join(self._fila_reclamo(d) for d in reclamos_pend) or \
-            "<tr><td colspan=5 class='vacio'>Sin reclamos pendientes.</td></tr>"
+    def _nombre_juez(self, juez_id: Optional[str]) -> str:
+        return self.nombres_jueces.get(juez_id or "", juez_id or "—")
 
-        return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta http-equiv="refresh" content="4">
-<title>Juez de turno — Desafío Fútbol</title>
-<style>
- body{{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;padding:24px}}
- h1{{margin:0 0 4px}} .sub{{color:#9a9;margin:0 0 20px}}
- table{{width:100%;border-collapse:collapse;margin-bottom:28px;font-size:14px}}
- th,td{{border:1px solid #333;padding:8px;text-align:left;vertical-align:top}}
- th{{background:#1b1b1b}} tr:nth-child(even){{background:#161616}}
- .vacio{{text-align:center;color:#777}}
- .riesgo{{color:#f55;font-weight:bold}} .ok{{color:#5f5}}
- .btn{{padding:5px 12px;border:none;border-radius:4px;cursor:pointer;font-weight:bold}}
- .aprobar{{background:#2a7}} .rechazar{{background:#a33;color:#fff}}
- form{{display:inline}}
- code{{color:#9cf}}
- .badge{{padding:2px 7px;border-radius:3px;font-size:12px}}
- .b-aprobado{{background:#163}} .b-rechazado{{background:#622}} .b-despachado{{background:#036}}
- .b-resuelto{{background:#036}}
-</style></head><body>
-<h1>⚖️ Interfaz del juez de turno</h1>
-<p class="sub">Partido en el minuto {minuto} · Juez de turno ahora: <b>{_escape(juez_turno)}</b> ·
- se actualiza solo cada 4 s</p>
+    # --- datos derivados -------------------------------------------------------------------
 
-<h2>Expedientes pendientes de aprobación ({len(pendientes)})</h2>
-<table>
-<tr><th>Expediente</th><th>Stream</th><th>Evidencia</th><th>Riesgo colateral</th>
-    <th>Bloqueo propuesto</th><th>Hash captura</th><th>Decisión</th></tr>
-{filas_pendientes}
-</table>
+    @staticmethod
+    def _agrupar_ordenes(ordenes: list) -> list:
+        """Agrupa las órdenes por bloqueo (expediente), más reciente primero.
 
-<h2>Reclamos pendientes ({len(reclamos_pend)})</h2>
-<table>
-<tr><th>Reclamo</th><th>Dominio</th><th>Mensaje</th><th>Propuesta de la plataforma</th><th>Decisión</th></tr>
-{filas_reclamos}
-</table>
+        Un mismo bloqueo se envía a cada proveedor en el tipo que acepta (y se reintenta si falla):
+        se muestra una sola línea con el estado más relevante por proveedor, en vez de una por orden.
+        """
+        grupos: dict = {}
+        for o in ordenes:
+            g = grupos.setdefault(o["expediente_id"], {"expediente_id": o["expediente_id"], "juez_id": o["juez_id"],
+                                                       "juzgado_id": o.get("juzgado_id", ""), "vence_min": o["vence_min"],
+                                                       "objetivos": [], "proveedores": {}, "aplicada_min": None})
+            if (o["tipo"], o["objetivo"]) not in g["objetivos"]:
+                g["objetivos"].append((o["tipo"], o["objetivo"]))
+            res = o.get("resultado", {})
+            estado = res.get("estado") or ("rechazada" if "error" in res else "enviada")
+            anterior = g["proveedores"].get(o["proveedor"], ("", ""))[0]
+            if RANGO_ESTADO.get(estado, 0) >= RANGO_ESTADO.get(anterior, -1):
+                g["proveedores"][o["proveedor"]] = (estado, o["tipo"])
+            if res.get("aplicada_min") is not None:
+                g["aplicada_min"] = min(x for x in (g["aplicada_min"], res["aplicada_min"]) if x is not None)
+        return list(reversed(list(grupos.values())))
 
-<h2>Últimas decisiones</h2>
-<table>
-<tr><th>Expediente</th><th>Stream</th><th>Estado</th><th>Firmado por</th></tr>
-{filas_decididos}
-</table>
-</body></html>"""
+    @staticmethod
+    def _chips(g: dict) -> str:
+        mixto = len({t for t, _ in g["objetivos"]}) > 1
+        return "".join(f"<span class='chip c-{_escape(est)}' title='{_escape(prov)}: {_escape(est)} ({_escape(tipo)})'>"
+                       f"{_escape(prov)}{(' · ' + _escape(tipo)) if mixto else ''}<i>{_escape(est)}</i></span>"
+                       for prov, (est, tipo) in g["proveedores"].items())
 
-    def _fila_expediente(self, d) -> str:
+    @staticmethod
+    def _objetivos(g: dict) -> str:
+        return " ".join(f"<span class='tipo t-{_escape(t)}'>{_escape(t)}</span> <code>{_escape(obj)}</code>"
+                        for t, obj in g["objetivos"])
+
+    def _clientes(self) -> Dict[str, int]:
+        return {p["id"]: p.get("clientes", 0) for p in self.proveedores}
+
+    def _cobertura(self, grupo: dict) -> float:
+        clientes = self._clientes()
+        total = sum(clientes.values()) or 1
+        return 100.0 * sum(clientes.get(p, 0) for p, (e, _) in grupo["proveedores"].items() if e == "aplicada") / total
+
+    # --- partido: marcador, línea de tiempo y relato ------------------------------------------
+
+    def _marcador(self, est: dict, titulo: str, subtitulo: str, derecha: str) -> str:
+        m, fin = est["minuto"], est["fin"]
+        goles = [g for g in GOLES_ILUSTRATIVOS if g[0] <= m]
+        gl, gv = sum(1 for g in goles if g[1] == "local"), sum(1 for g in goles if g[1] == "visitante")
+        festejo = next((g[1] for g in goles if m - g[0] < 2.5), None)
+        festejo_html = (f"<div class='festejo f-{festejo}' data-k='gol-{festejo}-{len(goles)}'>¡GOL de {_escape(self.local if festejo == 'local' else self.visitante)}!</div>"
+                        if festejo and not est["finalizado"] else "")
+        vivo = "off" if est["finalizado"] else ""
+        return f"""
+<header class="top">
+ <div class="brand"><div class="logo">{LOGO_APP}</div><div><b>{NOMBRE_APP}</b>
+   <span class="seccion">{_escape(titulo)}</span><small>{_escape(subtitulo)}</small></div></div>
+ <div class="centro">
+ <div class="torneo"><span class="liga">{ESCUDO_LIGA}</span><b>{_escape(LIGA.upper())}</b><i>Torneo 2026 · Fecha 12 · ficticio</i></div>
+ <div class="marcador{' gol' if festejo else ''}">
+  <div class="equipo local"><div class="escudo azul"><span>AJ</span></div><b>{_escape(self.local)}</b></div>
+  <div class="tanteador"><span>{gl}</span><i>-</i><span>{gv}</span></div>
+  <div class="equipo visit"><b>{_escape(self.visitante)}</b><div class="escudo rojo"><span>RP</span></div></div>
+  <div class="reloj"><span class="live {vivo}"><i></i>{etapa(m, est['finalizado'])}</span>
+   <b>{minuto_tv(min(m, fin)) if not est['finalizado'] else '90′'}</b><small>sim {min(m, fin):.0f}/{fin:.0f}</small></div>
+  {festejo_html}
+ </div></div>
+ <div class="duty">{derecha}</div>
+</header>"""
+
+    def _linea_de_tiempo(self, est: dict, todos: list) -> str:
+        m, fin = est["minuto"], est["fin"] or 105.0
+        pct = lambda x: max(0.0, min(100.0, x / fin * 100))  # noqa: E731
+        marcas = "".join(f"<span class='mk det{' riesgo' if d.expediente.riesgo_colateral else ''}' style='left:{pct(d.expediente.minuto_deteccion):.2f}%'"
+                         f" title='{_escape(minuto_tv(d.expediente.minuto_deteccion))} {_escape(d.expediente.host_stream)}'></span>"
+                         for d in todos)
+        marcas += "".join(f"<span class='mk gol' style='left:{pct(g[0]):.2f}%'>⚽</span>" for g in GOLES_ILUSTRATIVOS if g[0] <= m)
+        marcas += "".join(f"<span class='mk turno' style='left:{pct(t['desde_min']):.2f}%' title='Turno: "
+                          f"{_escape(self._nombre_juez(t['juez_id']))}'>⚖</span>"
+                          for t in self.turnos if 0 < t["desde_min"] <= min(m, fin))
+        return f"""
+<div class="timeline"><div class="tl-track">
+ <div class="tl-seg et" style="left:{pct(FIN_PRIMER_TIEMPO):.2f}%;width:{pct(FIN_ENTRETIEMPO) - pct(FIN_PRIMER_TIEMPO):.2f}%"></div>
+ <div class="tl-prog" style="width:{pct(m):.2f}%"></div>{marcas}
+ <span class="tl-now" style="left:{pct(m):.2f}%"></span></div>
+ <div class="tl-labels"><span style="left:0">0′</span><span style="left:{pct(FIN_PRIMER_TIEMPO / 2):.1f}%">1er tiempo</span>
+ <span style="left:{pct((FIN_PRIMER_TIEMPO + FIN_ENTRETIEMPO) / 2):.1f}%">ET</span>
+ <span style="left:{pct((FIN_ENTRETIEMPO + fin) / 2):.1f}%">2do tiempo</span><span style="left:100%">90′</span></div>
+ <div class="tl-ley"><i class="l-det"></i>stream pirata <i class="l-riesgo"></i>con riesgo colateral <b>⚽</b> gol (ilustrativo) <b>⚖</b> cambio de turno</div>
+</div>"""
+
+    def _relato(self, est: dict, todos: list, grupos: list) -> str:
+        m = est["minuto"]
+        eventos = [(g[0], "gol", f"¡Gol de {self.local if g[1] == 'local' else self.visitante}!")
+                   for g in GOLES_ILUSTRATIVOS if g[0] <= m]
+        eventos += [(d.expediente.minuto_deteccion, "det", f"Stream pirata detectado: {d.expediente.host_stream}") for d in todos]
+        exp_min = {d.expediente.id: d.expediente.minuto_deteccion for d in todos}
+        eventos += [(g["aplicada_min"], "blq", f"Bloqueo aplicado: {g['objetivos'][0][1]} · {self._cobertura(g):.0f}% clientes")
+                    for g in grupos if g["aplicada_min"] is not None and g["expediente_id"] in exp_min]
+        eventos += [(t["desde_min"], "turno", f"Cambio de turno: {self._nombre_juez(t['juez_id'])}")
+                    for t in self.turnos if 0 < t["desde_min"] <= m]
+        eventos += [(x, "fase", txt) for x, txt in ((FIN_PRIMER_TIEMPO, "Entretiempo"), (FIN_ENTRETIEMPO, "Arranca el segundo tiempo"),
+                                                    (est["fin"], "Final del partido: los bloqueos por IP vencen solos")) if x <= m]
+        icono = {"gol": "⚽", "det": "🚨", "blq": "🛡", "turno": "⚖", "fase": "⏱"}
+        chips = "".join(f"<div class='ev ev-{t}' data-k='{_escape(f'{x}-{t}-{txt}')}'><b>{_escape(minuto_tv(x))}</b><span>{icono[t]}</span>{_escape(txt)}</div>"
+                        for x, t, txt in sorted(eventos, key=lambda e: e[0], reverse=True)[:6])
+        return f"<div class='relato'><div class='relato-tit'>MINUTO A MINUTO</div><div class='evs'>{chips or '<div class=ev>Arranca el partido…</div>'}</div></div>"
+
+    # --- mesa del juez ---------------------------------------------------------------------
+
+    def _fragmento(self) -> str:
+        est = self._estado_simulador()
+        with self.mesa.lock:
+            todos = list(self.mesa.expedientes.values())
+            reclamos = list(self.mesa.reclamos.values())
+            ordenes = [dict(o, resultado=dict(o["resultado"])) for o in self.mesa.ordenes_enviadas]
+        # Primero los de riesgo colateral: son los que más exigen la mirada del juez.
+        pendientes = sorted((d for d in todos if d.estado == "pendiente"),
+                            key=lambda d: (not d.expediente.riesgo_colateral, d.expediente.minuto_deteccion))
+        decididos = sorted((d for d in todos if d.estado != "pendiente"),
+                           key=lambda d: d.decidido_min or 0, reverse=True)[:8]
+        reclamos_pend = [d for d in reclamos if d.estado == "pendiente"]
+        reclamos_ok = sum(1 for d in reclamos if d.estado != "pendiente")
+        grupos = self._agrupar_ordenes(ordenes)
+        activos = [g for g in grupos if any(e == "aplicada" for e, _ in g["proveedores"].values())]
+        minuto_det = {d.expediente.id: d.expediente.minuto_deteccion for d in todos}
+        demoras = [g["aplicada_min"] - minuto_det[g["expediente_id"]] for g in grupos
+                   if g["aplicada_min"] is not None and g["expediente_id"] in minuto_det]
+        demora_media = f"{sum(demoras) / len(demoras):.1f}′" if demoras else "—"
+        cobertura = (sum(self._cobertura(g) for g in activos) / len(activos)) if activos else 0.0
+        cadena_ok = self._cadena_ok()
+
+        turno = est["turno"][0] if est["turno"] else None
+        derecha = (f"<small>Juez de turno</small><b>{_escape(self._nombre_juez(turno)) if turno else 'Sin turno'}</b>"
+                   f"<span class='chain {'ok' if cadena_ok else 'bad'}'>{'🔒 Auditoría íntegra' if cadena_ok else '⚠ Auditoría alterada'}</span>"
+                   "<a class='pub' href='/transparencia' target='_blank'>Registro público ↗</a>")
+        seccion_reclamos = ""
+        if reclamos_pend:
+            seccion_reclamos = (f'<section><h2><span class="dot ambar"></span>Reclamos de terceros '
+                                f'<em>{len(reclamos_pend)}</em></h2><div class="grid">'
+                                + "".join(self._card_reclamo(d) for d in reclamos_pend) + "</div></section>")
+        cards = "".join(self._card_expediente(d) for d in pendientes[:8]) or (
+            "<div class='vacio grande'><div class='vacio-ico'>⚖</div><b>Mesa al día</b>"
+            "<span>No hay expedientes esperando decisión. Las detecciones nuevas aparecen acá solas.</span></div>")
+        mas = (f"<p class='nota'>+ {len(pendientes) - 8} más en cola · primero los de riesgo colateral</p>"
+               if len(pendientes) > 8 else "")
+        feed = "".join(self._item_bloqueo(g) for g in grupos[:8]) or \
+            "<div class='vacio'>Todavía no se firmó ninguna orden.</div>"
+        hist = "".join(self._fila_decidida(d) for d in decididos) or \
+            "<div class='vacio'>Todavía no se decidió ningún expediente.</div>"
+        sin_turno = "" if turno else ("<div class='banner'>⚠ No hay juez de turno en este momento: "
+                                      "nadie puede decidir ni firmar.</div>")
+
+        return f"""
+<div id="meta" data-pendientes="{_escape(','.join(d.expediente.id for d in pendientes))}"
+     data-reclamos="{_escape(','.join(d.reclamo['id'] for d in reclamos_pend))}"></div>
+{self._marcador(est, "Mesa del juez", LEMA_APP, derecha)}
+{self._linea_de_tiempo(est, todos)}
+{sin_turno}
+{self._relato(est, todos, grupos)}
+<div class="kpis">
+ <div class="kpi"><b>{len(pendientes)}</b><span>para decidir</span></div>
+ <div class="kpi rojo"><b>{sum(1 for d in pendientes if d.expediente.riesgo_colateral)}</b><span>con riesgo colateral</span></div>
+ <div class="kpi verde"><b>{len(activos)}</b><span>bloqueos activos</span></div>
+ <div class="kpi azul"><b>{cobertura:.0f}<small>%</small></b><span>clientes cubiertos</span></div>
+ <div class="kpi violeta"><b>{demora_media}</b><span>detección → bloqueo</span></div>
+ <div class="kpi ambar"><b>{reclamos_ok}</b><span>reclamos resueltos</span></div>
+</div>
+<div class="cols">
+ <main>
+  {seccion_reclamos}
+  <section><h2><span class="dot rojo"></span>Para revisar y firmar <em>{len(pendientes)}</em></h2>
+  <div class="grid">{cards}</div>{mas}</section>
+ </main>
+ <aside>
+  <section><h2><span class="dot verde"></span>Órdenes en proveedores</h2><div class="lista">{feed}</div></section>
+  <section><h2><span class="dot"></span>Últimas decisiones</h2><div class="lista">{hist}</div></section>
+ </aside>
+</div>"""
+
+    def _cadena_ok(self) -> bool:
+        auditoria = getattr(self.mesa, "auditoria", None)
+        try:
+            return auditoria is None or verificar_cadena(auditoria.ruta)
+        except Exception:
+            return False
+
+    def _card_expediente(self, d) -> str:
         e = d.expediente
-        riesgo = ('<span class="riesgo">SÍ — IP compartida con '
-                 f'{len(e.dominios_en_la_ip) - 1} sitio(s) más</span>' if e.riesgo_colateral
-                 else '<span class="ok">No</span>')
-        return f"""<tr>
- <td><b>{_escape(e.id)}</b><br><small>min {e.minuto_deteccion:g}</small></td>
- <td>{_escape(e.host_stream)}<br><small>{_escape(e.ip_servidor)} · ASN {e.asn}</small></td>
- <td>marca <code>{_escape(e.marca_de_agua)}</code><br>coincide con <code>{_escape(e.prefijo_coincidente)}</code></td>
- <td>{riesgo}</td>
- <td><b>{e.tipo_recomendado}</b> → <code>{_escape(e.objetivo_recomendado)}</code><br>
-     <small>vence min {e.vencimiento_propuesto}</small></td>
- <td><small>{_escape(e.hash_captura[:16])}…</small></td>
- <td>
-  <form method="post" action="/expedientes/{e.id}/decidir">
-   <button class="btn aprobar" name="decision" value="aprobar">Aprobar y firmar</button>
-   <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
-  </form>
- </td>
-</tr>"""
+        if e.riesgo_colateral:
+            otros = e.otros_sitios_en_la_ip
+            lista = "".join(f"<span>{_escape(s)}</span>" for s in otros[:6])
+            extra = f"<span>+{len(otros) - 6}</span>" if len(otros) > 6 else ""
+            alerta = (f'<div class="alerta"><b>Riesgo de daño colateral</b>{_escape(e.motivo_riesgo)}'
+                      f'<div class="sitios">{lista}{extra}</div></div>')
+        else:
+            alerta = f'<div class="limpio"><b>Sin riesgo colateral</b>{_escape(e.motivo_riesgo)}</div>'
+        checks = "".join(f"<li>{_escape(v)}</li>" for v in e.verificaciones)
+        promo = "".join(f"<a class='promo' href='{_escape(p.get('url', ''))}' target='_blank' rel='noopener'>"
+                        f"{ICONO_RED.get(p.get('red', ''), '•')} {_escape(p.get('red', ''))} · min {p.get('minuto', '?')}</a>"
+                        for p in e.promocion) or "<span class='nota'>sin datos</span>"
+        reiteradas = len(e.detecciones_adicionales)
+        return f"""<article class="card{' riesgo' if e.riesgo_colateral else ''}" data-k="{_escape(e.id)}">
+ <div class="meta"><span class="pill">{_escape(e.id)}</span> detectado {_escape(minuto_tv(e.minuto_deteccion))} · sim {e.minuto_deteccion:g}
+   {f"<span class='pill gris'>+{reiteradas} re-detección(es)</span>" if reiteradas else ""}</div>
+ <h3>{_escape(e.host_stream)}</h3>
+ <div class="srv"><code>{_escape(e.ip_servidor)}</code> · ASN {e.asn} · {_escape(e.organizacion or '—')}</div>
+ <div class="marca">✓ Señal oficial <code>{_escape(e.marca_de_agua)}</code></div>
+ {alerta}
+ <div class="pedido"><small>Orden propuesta</small>
+   <div><span class="tipo t-{_escape(e.tipo_recomendado)}">{_escape(e.tipo_recomendado)}</span>
+   <code>{_escape(e.objetivo_recomendado)}</code><span class="vence">vence min {e.vencimiento_propuesto}</span></div></div>
+ <details id="det-{_escape(e.id)}"><summary>Ver evidencia completa</summary>
+  <ul class="checks">{checks}</ul>
+  <dl>
+   <dt>Página</dt><dd>{_escape(e.pagina)}</dd>
+   <dt>Stream</dt><dd>{_escape(e.stream_url)}</dd>
+   <dt>Hash captura</dt><dd><code title="{_escape(e.hash_captura)}">{_escape(_corto(e.hash_captura))}</code></dd>
+   <dt>Hash detección</dt><dd><code title="{_escape(e.hash_deteccion)}">{_escape(_corto(e.hash_deteccion))}</code></dd>
+   <dt>Sello expediente</dt><dd><code title="{_escape(e.hash_expediente)}">{_escape(_corto(e.hash_expediente))}</code></dd>
+   <dt>Sellado</dt><dd>{_escape(e.sello_utc)} · min {', '.join(f'{s:g}' for s in e.sellos_tiempo)}</dd>
+   <dt>Promoción</dt><dd class="promos">{promo}</dd>
+  </dl>
+ </details>
+ <form method="post" action="/expedientes/{_escape(e.id)}/decidir">
+  <button class="btn aprobar" name="decision" value="aprobar">✓ Aprobar y firmar</button>
+  <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
+ </form>
+</article>"""
 
-    def _fila_reclamo(self, d) -> str:
+    def _card_reclamo(self, d) -> str:
         r = d.reclamo
-        return f"""<tr>
- <td>{_escape(r['id'])}<br><small>min {r['minuto']:.1f}</small></td>
- <td>{_escape(r['dominio'])}<br><small>vía {_escape(r['proveedor'])}</small></td>
- <td>{_escape(r['mensaje'])}</td>
- <td><b>{_escape(d.propuesta)}</b><br><small>{_escape(d.razon)}</small></td>
- <td>
-  <form method="post" action="/reclamos/{r['id']}/decidir">
-   <button class="btn aprobar" name="decision" value="aprobar">Aprobar propuesta</button>
-   <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
-  </form>
- </td>
-</tr>"""
+        orden = d.orden_afectada
+        afecta = (f"<div class='srv'>Orden afectada: <span class='tipo t-{_escape(orden.get('tipo', ''))}'>"
+                  f"{_escape(orden.get('tipo', ''))}</span> <code>{_escape(orden.get('objetivo', ''))}</code></div>"
+                  if orden else "")
+        return f"""<article class="card reclamo" data-k="{_escape(r['id'])}">
+ <div class="meta"><span class="pill ambar">{_escape(r['id'])}</span> min {r['minuto']:.1f} · vía {_escape(r['proveedor'])}</div>
+ <h3>{_escape(r['dominio'])}</h3>
+ <blockquote>“{_escape(r['mensaje'])}”</blockquote>
+ {afecta}
+ <div class="pedido"><small>Propuesta de la plataforma</small><div><span class="tipo">{_escape(d.propuesta.replace('_', ' '))}</span></div>
+ <p class="razon">{_escape(d.razon)}</p></div>
+ <form method="post" action="/reclamos/{_escape(r['id'])}/decidir">
+  <button class="btn aprobar" name="decision" value="aprobar">✓ Aprobar propuesta</button>
+  <button class="btn rechazar" name="decision" value="rechazar">Rechazar</button>
+ </form>
+</article>"""
+
+    def _item_bloqueo(self, g: dict) -> str:
+        cob = self._cobertura(g)
+        return (f"<div class='item'><div class='item-top'>{self._objetivos(g)}</div>"
+                f"<div class='cob'><div style='width:{cob:.0f}%'></div></div>"
+                f"<small>{_escape(g['expediente_id'])} · {cob:.0f}% de clientes · firmó "
+                f"{_escape(self._nombre_juez(g['juez_id']))} · vence min {g['vence_min']}</small>"
+                f"<div class='chips'>{self._chips(g)}</div></div>")
 
     def _fila_decidida(self, d) -> str:
         e = d.expediente
-        return (f"<tr><td>{_escape(e.id)}</td><td>{_escape(e.host_stream)}</td>"
-                f"<td><span class='badge b-{d.estado}'>{_escape(d.estado)}</span></td>"
-                f"<td>{_escape(d.decidido_por or '')}</td></tr>")
+        cuando = f" · min {d.minuto_decision:.0f}" if d.minuto_decision is not None else ""
+        return (f"<div class='item fila'><span class='badge b-{d.estado}'>{_escape(d.estado)}</span>"
+                f"<div><b>{_escape(e.host_stream)}</b><small>{_escape(e.id)} · {_escape(self._nombre_juez(d.decidido_por))}"
+                f"{cuando}</small></div></div>")
+
+    # --- registro público ------------------------------------------------------------------
+
+    def _fragmento_transparencia(self) -> str:
+        est = self._estado_simulador()
+        # La vista pública sale de Mesa.vista_transparencia (sin evidencia interna) y se agrupa por expediente.
+        filas = [{"expediente_id": f["expediente_id"], "juez_id": f["juez_id"], "juzgado_id": f["juzgado_id"],
+                  "vence_min": f["vence_min"], "tipo": f["tipo"], "objetivo": f["objetivo"], "proveedor": f["proveedor"],
+                  "resultado": {"estado": f["estado"], "aplicada_min": f["desde_min"]}}
+                 for f in self.mesa.vista_transparencia()]
+        cuerpo = "".join(
+            f"<tr><td>{self._objetivos(g)}</td><td>{_escape(g['expediente_id'])}</td>"
+            f"<td>{_escape(self._nombre_juez(g['juez_id']))}<small>{_escape(g['juzgado_id'])}</small></td>"
+            f"<td>{'min ' + format(g['aplicada_min'], '.1f') if g['aplicada_min'] is not None else '—'}</td>"
+            f"<td>min {g['vence_min']}</td><td><div class='chips'>{self._chips(g)}</div></td></tr>"
+            for g in self._agrupar_ordenes(filas))
+        cuerpo = cuerpo or "<tr><td colspan='6' class='vacio'>Todavía no hay bloqueos ordenados.</td></tr>"
+        return f"""
+{self._marcador(est, "Registro público", "Qué se bloqueó, cuándo, por orden de quién y hasta cuándo",
+                "<small>Datos abiertos</small><a class='pub' href='/transparencia.json'>transparencia.json ↗</a>")}
+<p class="aviso">Este registro no publica la evidencia interna de los expedientes (capturas, metadatos de detección)
+para no ofrecer un mapa para evadir el próximo bloqueo. Los bloqueos por IP vencen solos al terminar el partido.</p>
+<div class="tabla"><table><thead><tr><th>Bloqueo</th><th>Expediente</th><th>Ordenado por</th>
+<th>Desde</th><th>Hasta</th><th>Estado por proveedor</th></tr></thead><tbody>{cuerpo}</tbody></table></div>"""
 
 
-def iniciar_servidor_juez(mesa: Mesa, base_simulador: str, puerto: int) -> ThreadingHTTPServer:
+_PAGINA_BASE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tarjeta Roja · __TITULO__</title>
+<link rel="icon" href="__FAVICON__">
+<style>
+ :root{--bg:#060d0a;--bg2:#0c1320;--card:rgba(16,24,30,.84);--borde:rgba(130,170,160,.16);--txt:#eef5f1;--sub:#8fa39b;
+       --rojo:#ff5d6c;--verde:#2fd08a;--azul:#4da3ff;--ambar:#ffb547;--violeta:#a78bfa;
+       --boca:#0b3d91;--oro:#f6c700;--river:#e2141f;--display:"Oswald","Bebas Neue","Barlow Condensed","Roboto Condensed","DejaVu Sans Condensed",Impact,sans-serif}
+ *{box-sizing:border-box}
+ body{font-family:Inter,"Noto Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--txt);margin:0;padding:18px clamp(14px,3vw,36px) 48px;
+      font-size:15px;min-height:100vh;background-attachment:fixed;
+      background:radial-gradient(900px 420px at 50% -120px,rgba(47,208,138,.20),transparent 70%),
+                 radial-gradient(700px 700px at 50% 52%,transparent 179px,rgba(255,255,255,.035) 180px,rgba(255,255,255,.035) 182px,transparent 183px),
+                 linear-gradient(90deg,transparent calc(50% - 1px),rgba(255,255,255,.03) calc(50% - 1px),rgba(255,255,255,.03) calc(50% + 1px),transparent calc(50% + 1px)),
+                 repeating-linear-gradient(90deg,rgba(47,208,138,.045) 0 110px,rgba(47,208,138,.015) 110px 220px),var(--bg)}
+ h2,.kpi b,.relato-tit{font-family:var(--display)}
+ .marcador{position:relative;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:0;min-width:640px;
+           background:linear-gradient(180deg,#121a22,#0a1016);border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:visible;
+           box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 30px rgba(0,0,0,.45)}
+ .equipo{display:flex;align-items:center;gap:14px;padding:12px 18px;font-family:var(--display);text-transform:uppercase;letter-spacing:.04em}
+ .equipo b{font-size:24px;font-weight:700;white-space:nowrap}
+ .equipo.local{justify-content:flex-end;border-radius:16px 0 0 16px;background:linear-gradient(90deg,transparent,rgba(11,61,145,.55))}
+ .equipo.local b{color:#fff;text-shadow:0 0 18px rgba(246,199,0,.35)}
+ .equipo.visit{justify-content:flex-start;border-radius:0 16px 16px 0;background:linear-gradient(270deg,transparent,rgba(226,20,31,.45))}
+ .escudo{width:46px;height:54px;display:grid;place-items:center;clip-path:polygon(0 0,100% 0,100% 62%,50% 100%,0 62%);
+         font:800 15px var(--display);letter-spacing:.02em;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));flex:0 0 auto}
+ .escudo span{margin-top:-6px}
+ .escudo.azul{background:linear-gradient(180deg,var(--boca) 0 36%,var(--oro) 36% 60%,var(--boca) 60%);color:#fff}
+ .escudo.azul span{color:#fff;text-shadow:0 1px 2px #000}
+ .escudo.rojo{background:linear-gradient(135deg,#fff 0 38%,var(--river) 38% 62%,#fff 62%);color:#111}
+ .escudo.rojo span{background:rgba(255,255,255,.85);padding:0 3px;border-radius:3px}
+ .tanteador{display:flex;align-items:center;gap:10px;padding:6px 22px;background:#05080b;height:100%;
+            font:700 46px/1 var(--display);font-variant-numeric:tabular-nums;border-left:1px solid rgba(255,255,255,.08);border-right:1px solid rgba(255,255,255,.08)}
+ .tanteador i{font-style:normal;color:var(--sub);font-size:30px}
+ .reloj{position:absolute;left:50%;top:100%;transform:translate(-50%,-6px);display:flex;align-items:center;gap:10px;white-space:nowrap;
+        background:var(--verde);color:#03170d;padding:4px 14px;border-radius:0 0 10px 10px;font:700 15px var(--display);letter-spacing:.06em;
+        box-shadow:0 6px 16px rgba(47,208,138,.3)}
+ .reloj b{font-size:19px}.reloj small{color:#0b3a24;font:600 11px Inter,sans-serif;letter-spacing:0;display:inline}
+ .reloj .live,.reloj .live.off{color:#03170d;margin:0;font-size:11px}.reloj .live i{background:#c4001a}
+ .marcador.gol .tanteador span{animation:golazo .6s ease-in-out infinite alternate}
+ @keyframes golazo{to{color:var(--oro);transform:scale(1.15)}}
+ .festejo{position:absolute;left:50%;top:-14px;transform:translateX(-50%);padding:3px 14px;border-radius:8px;font:700 15px var(--display);
+          letter-spacing:.08em;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.5)}
+ .f-local{background:var(--oro);color:var(--boca)}.f-visitante{background:var(--river);color:#fff}
+ .timeline{background:var(--card);border:1px solid var(--borde);border-radius:14px;padding:16px 20px 10px;margin:24px 0 14px}
+ .tl-track{position:relative;height:12px;border-radius:6px;background:repeating-linear-gradient(90deg,rgba(47,208,138,.16) 0 4%,rgba(47,208,138,.09) 4% 8%)}
+ .tl-seg.et{position:absolute;top:0;height:100%;background:repeating-linear-gradient(45deg,rgba(255,255,255,.08) 0 5px,transparent 5px 10px);border-radius:3px}
+ .tl-prog{position:absolute;inset:0 auto 0 0;border-radius:6px;background:linear-gradient(90deg,rgba(47,208,138,.55),var(--verde));transition:width 1.4s linear}
+ .tl-now{position:absolute;top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:#fff;
+         box-shadow:0 0 0 4px rgba(47,208,138,.35),0 0 16px rgba(255,255,255,.6);transition:left 1.4s linear}
+ .tl-now:after{content:"⚽";position:absolute;inset:0;display:grid;place-items:center;font-size:14px;line-height:1}
+ .mk{position:absolute;transform:translateX(-50%)}
+ .mk.det{top:-7px;width:4px;height:26px;border-radius:2px;background:var(--azul);box-shadow:0 0 8px var(--azul)}
+ .mk.det.riesgo{background:var(--ambar);box-shadow:0 0 8px var(--ambar)}
+ .mk.gol{top:-26px;font-size:15px}.mk.turno{top:15px;font-size:13px;color:var(--violeta)}
+ .tl-labels{position:relative;height:18px;margin-top:10px;font:600 11px var(--display);color:var(--sub);letter-spacing:.08em;text-transform:uppercase}
+ .tl-labels span{position:absolute;transform:translateX(-50%)}.tl-labels span:first-child{transform:none}.tl-labels span:last-child{transform:translateX(-100%)}
+ .tl-ley{display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--sub);margin-top:6px}
+ .tl-ley i{display:inline-block;width:4px;height:12px;border-radius:2px;margin-right:-8px}.l-det{background:var(--azul)}.l-riesgo{background:var(--ambar)}
+ .tl-ley b{font-weight:400;margin-right:-8px}
+ .relato{display:flex;align-items:stretch;gap:12px;margin-bottom:16px;overflow:hidden}
+ .relato-tit{flex:0 0 auto;display:grid;place-items:center;padding:0 14px;background:var(--river);color:#fff;font-weight:700;letter-spacing:.08em;
+             border-radius:10px;font-size:14px;writing-mode:horizontal-tb}
+ .evs{display:flex;gap:10px;overflow:hidden;flex:1;mask-image:linear-gradient(90deg,#000 85%,transparent)}
+ .ev{flex:0 0 auto;display:flex;gap:8px;align-items:center;background:var(--card);border:1px solid var(--borde);border-radius:10px;padding:8px 12px;font-size:13px;
+     white-space:nowrap}
+ .ev b{font-family:var(--display);color:var(--verde);font-size:15px}
+ .ev-gol{border-color:rgba(246,199,0,.5);background:rgba(246,199,0,.08)}.ev-det{border-color:rgba(77,163,255,.35)}
+ .ev-blq{border-color:rgba(47,208,138,.4)}.ev-turno{border-color:rgba(167,139,250,.45)}
+ a{color:var(--azul);text-decoration:none}
+ small{color:var(--sub);display:block;font-size:12.5px;font-weight:400}
+ em{font-style:normal;color:var(--sub);font-weight:600;margin-left:8px;background:rgba(255,255,255,.06);padding:1px 9px;border-radius:20px;font-size:13px}
+ code{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;color:#a8d4ff;background:rgba(77,163,255,.1);padding:1px 7px;border-radius:6px;font-size:12.5px;word-break:break-all}
+ .top{display:grid;grid-template-columns:1fr auto 1fr;gap:24px;align-items:center;margin-bottom:18px;padding:18px 22px 30px;
+      background:linear-gradient(180deg,rgba(18,30,28,.9),rgba(10,16,18,.9));border:1px solid var(--borde);border-radius:18px;
+      backdrop-filter:blur(10px);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+ .brand{display:flex;gap:14px;align-items:center}.brand b{font-size:19px;display:block;letter-spacing:-.01em}
+ .logo{width:54px;height:54px;border-radius:15px;display:grid;place-items:center;padding:5px;flex:0 0 auto;
+       background:radial-gradient(circle at 30% 20%,#25323d,#0b1116);border:1px solid rgba(255,90,102,.35);box-shadow:0 6px 22px rgba(226,20,31,.3)}
+ .logo svg,.liga svg{width:100%;height:100%;display:block}
+ .brand b{font-family:var(--display);font-size:25px;text-transform:uppercase;letter-spacing:.05em;line-height:1;
+          background:linear-gradient(90deg,#fff,#ffb3b9);-webkit-background-clip:text;background-clip:text;color:transparent}
+ .seccion{display:inline-block;margin:4px 0 2px;font:700 11px var(--display);letter-spacing:.12em;text-transform:uppercase;
+          color:#ff8a94;background:rgba(226,20,31,.14);border:1px solid rgba(226,20,31,.3);padding:1px 8px;border-radius:6px}
+ .centro{display:flex;flex-direction:column;align-items:center;gap:8px}
+ .torneo{display:flex;align-items:center;gap:8px;font-family:var(--display);text-transform:uppercase;letter-spacing:.1em}
+ .torneo .liga{width:34px;height:37px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))}
+ .torneo b{font-size:13px;color:#cfe3f5}.torneo i{font-style:normal;font-size:11px;color:var(--sub)}
+ .torneo i:before{content:"·";margin-right:8px;color:#6cace4}
+ .live{display:inline-flex;gap:8px;align-items:center;color:var(--rojo);font-weight:800;letter-spacing:.16em;font-size:11px;margin-bottom:4px}
+ .live i{width:8px;height:8px;border-radius:50%;background:var(--rojo);box-shadow:0 0 0 0 rgba(255,93,108,.7);animation:pulso 1.4s infinite}
+ .live.off{color:var(--sub)}.live.off i{animation:none;background:var(--sub)}
+ @keyframes pulso{70%{box-shadow:0 0 0 10px rgba(255,93,108,0)}100%{box-shadow:0 0 0 0 rgba(255,93,108,0)}}
+ .duty{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}.duty b{font-size:17px}
+ .chain{font-size:12px;padding:3px 10px;border-radius:20px;font-weight:600}
+ .chain.ok{background:rgba(47,208,138,.12);color:var(--verde)}.chain.bad{background:rgba(255,93,108,.15);color:var(--rojo)}
+ .pub{font-size:12.5px;font-weight:600}
+ .banner{background:rgba(255,181,71,.12);border:1px solid rgba(255,181,71,.35);color:var(--ambar);padding:12px 16px;border-radius:12px;margin-bottom:16px;font-weight:600}
+ .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:22px}
+ .kpi{background:var(--card);border:1px solid var(--borde);border-radius:16px;padding:14px 18px;position:relative;overflow:hidden}
+ .kpi:before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--sub);opacity:.5}
+ .kpi b{font-size:30px;line-height:1.15;display:block;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+ .kpi b small{display:inline;font-size:16px}
+ .kpi span{color:var(--sub);font-size:12.5px;font-weight:500}
+ .kpi.rojo b{color:var(--rojo)}.kpi.rojo:before{background:var(--rojo);opacity:1}
+ .kpi.verde b{color:var(--verde)}.kpi.verde:before{background:var(--verde);opacity:1}
+ .kpi.azul b{color:var(--azul)}.kpi.azul:before{background:var(--azul);opacity:1}
+ .kpi.ambar b{color:var(--ambar)}.kpi.ambar:before{background:var(--ambar);opacity:1}
+ .kpi.violeta b{color:var(--violeta)}.kpi.violeta:before{background:var(--violeta);opacity:1}
+ .cols{display:grid;grid-template-columns:minmax(0,2.1fr) minmax(320px,1fr);gap:24px;align-items:start}
+ aside{position:sticky;top:16px}
+ h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:#c9d5e6;margin:0 0 12px;display:flex;align-items:center}
+ section{margin-bottom:26px}
+ .dot{width:9px;height:9px;border-radius:50%;margin-right:10px;background:var(--azul);box-shadow:0 0 12px currentColor}
+ .dot.rojo{background:var(--rojo)}.dot.ambar{background:var(--ambar)}.dot.verde{background:var(--verde)}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;align-items:start}
+ .card{background:var(--card);border:1px solid var(--borde);border-radius:18px;padding:18px 20px;backdrop-filter:blur(8px);
+       box-shadow:0 8px 30px rgba(0,0,0,.25)}
+ .nuevo{animation:entra .4s ease-out}
+ .festejo.nuevo{animation:pop .45s ease-out}
+ @keyframes pop{from{opacity:0;transform:translateX(-50%) scale(.6)}}
+ @keyframes entra{from{opacity:0;transform:translateY(6px)}}
+ .card.riesgo{border-color:rgba(255,93,108,.55);box-shadow:0 0 0 1px rgba(255,93,108,.25),0 8px 30px rgba(255,93,108,.08)}
+ .card.reclamo{border-color:rgba(255,181,71,.55)}
+ .card h3{margin:8px 0 4px;font-size:21px;letter-spacing:-.01em;word-break:break-all}
+ .meta{color:var(--sub);font-size:12.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+ .pill{background:rgba(77,163,255,.14);color:#9fcaff;border-radius:20px;padding:2px 10px;font-weight:700;font-size:11.5px}
+ .pill.gris{background:rgba(255,255,255,.07);color:var(--sub)}.pill.ambar{background:rgba(255,181,71,.15);color:var(--ambar)}
+ .srv{color:var(--sub);font-size:13px;margin:4px 0}
+ .marca{font-size:13.5px;color:var(--verde);margin:8px 0}
+ .alerta,.limpio{border-radius:12px;padding:10px 13px;margin:10px 0;font-size:13px}
+ .alerta{background:rgba(255,93,108,.1);border:1px solid rgba(255,93,108,.3);color:#ffb3ba}
+ .alerta b,.limpio b{display:block;font-size:13.5px;margin-bottom:2px}
+ .alerta b{color:var(--rojo)}.limpio{background:rgba(47,208,138,.08);border:1px solid rgba(47,208,138,.25);color:#a9ecc9}.limpio b{color:var(--verde)}
+ .sitios{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.sitios span{background:rgba(255,93,108,.14);border-radius:6px;padding:1px 7px;font-size:11.5px}
+ .pedido{background:rgba(255,255,255,.035);border:1px dashed var(--borde);border-radius:12px;padding:10px 13px;margin:10px 0}
+ .pedido>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+ .vence{margin-left:auto;color:var(--sub);font-size:12px}
+ .razon{margin:6px 0 0;font-size:13px;color:#c3cfe0}
+ blockquote{margin:8px 0;padding:8px 12px;border-left:3px solid var(--ambar);background:rgba(255,181,71,.06);border-radius:0 8px 8px 0;color:#e7d8bf;font-size:13.5px}
+ .tipo{display:inline-block;color:#1a1200;background:var(--ambar);font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.08em;padding:2px 8px;border-radius:6px}
+ .t-ip{background:var(--violeta);color:#140b2e}.t-dominio{background:var(--azul);color:#04162b}
+ details{margin:8px 0;font-size:13px}
+ summary{cursor:pointer;color:var(--azul);font-weight:600;list-style:none}summary::before{content:"▸ ";}
+ details[open] summary::before{content:"▾ "}
+ .checks{list-style:none;padding:0;margin:10px 0}.checks li{padding:3px 0 3px 22px;position:relative;color:#c9d5e6}
+ .checks li:before{content:"✓";position:absolute;left:2px;color:var(--verde);font-weight:800}
+ dl{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:8px 0}dt{color:var(--sub)}dd{margin:0;word-break:break-all}
+ .promos{display:flex;flex-wrap:wrap;gap:6px}.promo{background:rgba(167,139,250,.14);color:#cbbcff;border-radius:6px;padding:1px 8px;font-size:12px}
+ form{display:flex;gap:10px;margin-top:14px}
+ .btn{flex:1;padding:13px;border:0;border-radius:12px;cursor:pointer;font-weight:800;font-size:15px;transition:.15s;font-family:inherit}
+ .aprobar{background:linear-gradient(135deg,#2fd08a,#1fae70);color:#03170d;box-shadow:0 6px 18px rgba(47,208,138,.25)}
+ .rechazar{background:rgba(255,93,108,.1);color:#ff9aa4;border:1px solid rgba(255,93,108,.3);flex:0 0 auto;padding:13px 18px}
+ .btn:hover{filter:brightness(1.1);transform:translateY(-1px)}.btn:disabled{opacity:.5;cursor:wait;transform:none}
+ .lista{display:flex;flex-direction:column;gap:9px}
+ .item{background:var(--card);border:1px solid var(--borde);border-radius:14px;padding:11px 14px;font-size:13.5px}
+ .item-top{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap}
+ .item.fila{display:flex;gap:10px;align-items:center}
+ .cob{height:4px;background:rgba(255,255,255,.07);border-radius:3px;margin:9px 0 5px;overflow:hidden}
+ .cob div{height:100%;background:linear-gradient(90deg,var(--verde),#7cf0bb);transition:width .6s}
+ .vacio{color:var(--sub);font-size:13.5px;padding:8px 2px}
+ .vacio.grande{grid-column:1/-1;padding:44px;text-align:center;border:1px dashed var(--borde);border-radius:18px;display:flex;flex-direction:column;gap:6px;align-items:center}
+ .vacio-ico{font-size:34px;opacity:.6}.vacio.grande b{color:var(--txt);font-size:17px}
+ .nota{color:var(--sub);font-size:13px}
+ .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+ .chip{font-size:11.5px;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.06);color:var(--sub);display:inline-flex;gap:6px;font-weight:600}
+ .chip i{font-style:normal;font-weight:500;opacity:.85}
+ .c-aplicada{background:rgba(47,208,138,.14);color:#6fe3ad}.c-recibida,.c-enviada{background:rgba(77,163,255,.14);color:#9fcaff}
+ .c-fallida,.c-rechazada{background:rgba(255,93,108,.15);color:#ff9aa4}.c-reemplazada{opacity:.6}
+ .c-vencida{background:rgba(255,255,255,.06);color:#b6c2d3}.c-levantada{background:rgba(255,181,71,.15);color:var(--ambar)}
+ .badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+ .b-aprobado,.b-despachado{background:rgba(47,208,138,.15);color:#6fe3ad}.b-rechazado{background:rgba(255,93,108,.15);color:#ff9aa4}
+ .aviso{color:var(--sub);max-width:900px;margin:0 0 16px}
+ .tabla{background:var(--card);border:1px solid var(--borde);border-radius:18px;overflow:auto}
+ table{width:100%;border-collapse:collapse;font-size:13.5px}
+ th{text-align:left;color:var(--sub);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:13px 16px;border-bottom:1px solid var(--borde)}
+ td{padding:12px 16px;border-bottom:1px solid rgba(120,150,190,.08);vertical-align:top}
+ tr:hover td{background:rgba(255,255,255,.02)}
+ #toast{position:fixed;right:22px;bottom:22px;background:linear-gradient(135deg,var(--azul),var(--violeta));color:#fff;padding:14px 18px;
+        border-radius:14px;font-weight:700;box-shadow:0 12px 40px rgba(0,0,0,.45);transform:translateY(30px);opacity:0;
+        visibility:hidden;transition:.35s;z-index:9}
+ #toast.show{transform:none;opacity:1;visibility:visible}
+ #notif{position:fixed;left:22px;bottom:22px;background:var(--card);border:1px solid var(--borde);color:var(--txt);padding:9px 14px;border-radius:12px;cursor:pointer;font-size:13px}
+ @media(max-width:1300px){.kpis{grid-template-columns:repeat(3,1fr)}.top{grid-template-columns:1fr auto}.top .brand{display:none}}
+ @media(max-width:900px){.cols{grid-template-columns:1fr}.top{grid-template-columns:1fr;text-align:center}.brand{justify-content:center}
+   .marcador{min-width:0;width:100%}.equipo{padding:10px 8px;gap:8px}.equipo b{font-size:15px;white-space:normal}.escudo{width:34px;height:40px;font-size:12px}
+   .tanteador{font-size:34px;padding:6px 12px}.relato-tit{display:none}.tl-labels{font-size:9px}.tl-ley{display:none}
+   .duty{align-items:center;text-align:center}.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}aside{position:static}}
+</style></head><body>
+<div id="app"></div><div id="toast"></div>
+<button id="notif" hidden>🔔 Activar avisos</button>
+<script>
+// Una sola ventana en vivo: pide el contenido cada 1,5 s y lo reemplaza en su lugar (sin recargar la página).
+const FRAG = '__FRAG__', app = document.getElementById('app'), toast = document.getElementById('toast');
+let ultimo = '', ocupado = false, conocidos = null;
+function avisar(texto) {
+  toast.textContent = texto; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 4000);
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.setValueAtTime(.08, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + .35); o.start(); o.stop(ctx.currentTime + .35);
+  } catch (e) {}
+  if ('Notification' in window && Notification.permission === 'granted') new Notification('Mesa del juez', {body: texto});
+}
+function revisarNuevos() {
+  const meta = document.getElementById('meta'); if (!meta) return;
+  const ids = (meta.dataset.pendientes + ',' + meta.dataset.reclamos).split(',').filter(Boolean);
+  const nuevos = conocidos ? ids.filter(i => !conocidos.has(i)) : [];
+  conocidos = new Set([...(conocidos || []), ...ids]);
+  const pend = meta.dataset.pendientes.split(',').filter(Boolean).length;
+  document.title = (pend ? '(' + pend + ') ' : '') + 'Tarjeta Roja · Mesa del juez';
+  if (nuevos.length) avisar(nuevos.length === 1 ? 'Nuevo para decidir: ' + nuevos[0] : nuevos.length + ' nuevos para decidir');
+}
+async function refrescar() {
+  if (ocupado) return;
+  try {
+    const html = await (await fetch(FRAG, {cache: 'no-store'})).text();
+    if (html !== ultimo) {
+      const abiertos = [...document.querySelectorAll('details[open]')].map(d => d.id), y = window.scrollY;
+      const antes = new Set([...app.querySelectorAll('[data-k]')].map(e => e.dataset.k));
+      app.innerHTML = html; ultimo = html;
+      // Solo se anima lo que aparece por primera vez; lo demás se reemplaza sin parpadear.
+      app.querySelectorAll('[data-k]').forEach(e => { if (!antes.has(e.dataset.k)) e.classList.add('nuevo'); });
+      abiertos.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
+      window.scrollTo(0, y); revisarNuevos();
+    }
+  } catch (e) { /* el servidor puede estar reiniciando: reintenta */ }
+}
+document.addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const boton = ev.submitter, form = ev.target, datos = new URLSearchParams();
+  if (boton && boton.name) datos.append(boton.name, boton.value);
+  if (boton && boton.value === 'rechazar') {
+    const motivo = prompt('Motivo del rechazo (queda en la auditoría):', '');
+    if (motivo === null) return;
+    datos.append('motivo', motivo);
+  }
+  ocupado = true;
+  form.querySelectorAll('button').forEach(b => b.disabled = true);
+  try { await fetch(form.action, {method: 'POST', body: datos, headers: {'X-Requested-With': 'fetch'}}); }
+  finally { ocupado = false; ultimo = ''; refrescar(); }
+});
+const nb = document.getElementById('notif');
+if (FRAG === '/fragmento' && 'Notification' in window && Notification.permission === 'default') {
+  nb.hidden = false; nb.onclick = () => Notification.requestPermission().then(() => nb.hidden = true);
+}
+refrescar(); setInterval(refrescar, 1500);
+</script></body></html>"""
+
+
+_PAGINA_BASE = _PAGINA_BASE.replace("__FAVICON__", FAVICON)
+
+
+def iniciar_servidor_juez(mesa: Mesa, base_simulador: str, puerto: int, despachador=None,
+                          equipos: tuple = ("Azul Juniors", "Rojo Plate")) -> ThreadingHTTPServer:
     JuezHandler.mesa = mesa
     JuezHandler.base_simulador = base_simulador
+    JuezHandler.local, JuezHandler.visitante = equipos
+    try:
+        JuezHandler.turnos = pedir(base_simulador, "/juzgados").get("turnos", [])
+    except Exception:
+        JuezHandler.turnos = []
+    if despachador is not None:
+        JuezHandler.proveedores = despachador.proveedores
+        JuezHandler.nombres_jueces = {jid: j.get("nombre", jid) for jid, j in despachador.jueces.jueces.items()}
     servidor = ThreadingHTTPServer(("0.0.0.0", puerto), JuezHandler)
     threading.Thread(target=servidor.serve_forever, daemon=True).start()
     return servidor
