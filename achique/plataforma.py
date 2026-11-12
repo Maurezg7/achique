@@ -23,6 +23,7 @@ from .firmas import RegistroJueces
 from .mesa import Mesa
 from .reclamos import GestorReclamos, hilo_reclamos
 from .servidor_juez import iniciar_servidor_juez
+from .reanudacion import reanudar
 from .sesiones import USUARIOS_DEMO, Usuarios
 
 
@@ -98,8 +99,13 @@ def main() -> None:
     licenciatarios = {d for p in pedir(base, "/partido").get("licenciatarios", []) for d in p["dominios_autorizados"]}
     gestor_reclamos = GestorReclamos(base, mesa, despachador, licenciatarios)
     ingesta = Ingesta(base, mesa, builder, gestor_reclamos, auditoria, Path(args.log).parent / "expedientes")
+    recuperado = reanudar(Path(args.log), ingesta.carpeta, mesa, builder, ingesta, despachador, gestor_reclamos,
+                          auditoria)
     auditoria.registrar("plataforma_iniciada", simulador=base, partido=builder.partido_id,
                         proveedores=[p["id"] for p in despachador.proveedores])
+    if recuperado:
+        print(f"Reanudación: {recuperado['expedientes']} expediente(s) ({recuperado['pendientes']} pendiente(s)), "
+              f"{recuperado['ordenes']} orden(es) y {recuperado['detecciones_vistas']} detección(es) ya procesadas.")
 
     detener = threading.Event()
     hilos = [

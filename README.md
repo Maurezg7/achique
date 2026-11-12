@@ -95,6 +95,21 @@ python3 -m achique.evidencia ../desafio-futbol/salida/expedientes/EXP-2026-00000
 
 `python3 plataforma.py` es un atajo; también se puede correr con `python3 -m achique` desde la raíz del repo.
 
+**Si la plataforma se reinicia a mitad del partido**, volvé a correr el mismo comando con el mismo `--log`: retoma
+desde la auditoría y los expedientes exportados (sin duplicar expedientes ni órdenes, con los pendientes otra vez en
+la Mesa y siguiendo las órdenes ya enviadas). Los jueces vuelven a ingresar. Queda registrado como `plataforma_reanudada`.
+
+**Entregables del partido final** (expediente, auditoría y evaluación) en un paso, desde `mi_solucion-futbol/`:
+
+```bash
+python3 -m achique.entrega --registro ../desafio-futbol/salida/registro.jsonl \
+    --auditoria ../desafio-futbol/salida/auditoria.jsonl --expedientes ../desafio-futbol/salida/expedientes \
+    --verificar ../desafio-futbol/evaluacion/verificar.py
+```
+
+Deja `entrega/auditoria_final.jsonl`, `entrega/expediente_final.json` (por dominio), `entrega/expediente_final_ip.json`
+y `entrega/evaluacion_final.txt`; después, commit y push antes del cierre.
+
 Tests (sin dependencias, sin red):
 
 ```bash
@@ -143,6 +158,8 @@ mi_solucion-futbol/
 │   ├── reclamos.py            # verificación y resolución de reclamos
 │   ├── auditoria.py           # cadena de hashes (CLI de verificación)
 │   ├── asistente.py           # asistente del juez: vigila, explica y guía (por reglas, offline)
+│   ├── reanudacion.py         # tras un reinicio, retoma desde la auditoría y los expedientes exportados
+│   ├── entrega.py             # arma los entregables del partido final en entrega/
 │   ├── servidor_juez.py       # Mesa del juez y registro público
 │   └── web/                   # index.html, estilos.css, app.js, logo.svg, liga.svg
 ├── tests/                     # unittest con simulador falso en memoria
@@ -173,6 +190,8 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
 | `auditoria.py` | JSONL append-only encadenado por SHA-256; `verificar_cadena()` detecta cualquier edición o borrado. |
 | `asistente.py` | Asistente del juez local y por reglas (sin API ni red): vigila demoras de firma, órdenes rechazadas / fallidas / sin confirmar, bloqueos por IP cerca del final, turno y cadena de auditoría; explica cada expediente y reclamo en lenguaje claro y marca el siguiente paso. Sus alertas quedan en la auditoría (`asistente_alerta`). **Recomienda, nunca aprueba ni firma.** También en `/asistente.json`. |
 | `servidor_juez.py` | Mesa del juez en vivo (escritorio y celular, avisos sonoros y notificaciones) y registro público. Incluye una guía interactiva de 13 pasos (botón 🧭) y "Mostrame dónde", que resalta el elemento a revisar. La página, estilos, script y logos están en `web/`. |
+| `reanudacion.py` | Si se arranca con un `--log` que ya tiene eventos, reconstruye el estado: detecciones ya procesadas, expedientes (desde `salida/expedientes/`), decisiones, órdenes enviadas y su último estado. No duplica expedientes ni órdenes; completa lo que quedó a medio despachar. |
+| `entrega.py` | `python3 -m achique.entrega …`: copia a `entrega/` la auditoría, un expediente por dominio y uno por IP (verificando sellos y cadena) y la salida de `verificar.py`. |
 | `plataforma.py` | Punto de entrada: hilos de ingesta, despacho, reclamos y servidor HTTP. |
 
 ## Decisiones clave
@@ -200,7 +219,8 @@ detecciones ─► evidencia.py ─► mesa.py ◄── servidor_juez.py (juez 
   en producción se usaría la Public Suffix List).
 - El vencimiento propuesto es el fin del partido (`fin_min`) para IP y dominio; el proveedor lo aplica solo.
 - El turno lo informa `/estado` del simulador; la plataforma lo consulta en cada decisión y en cada firma.
-- Las sesiones viven en memoria: si se reinicia la plataforma, los jueces vuelven a ingresar.
+- Las sesiones viven en memoria: si se reinicia la plataforma, los jueces vuelven a ingresar (el resto del estado se
+  recupera de la auditoría, ver `reanudacion.py`).
 - La firma HMAC con claves de demostración reemplaza a la firma digital real del juez.
 
 ## Qué existía antes del evento

@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from achique import despacho, evidencia, firmas, servidor_juez, sesiones  # noqa: E402
+from achique import despacho, evidencia, firmas, plataforma, reanudacion, reclamos, servidor_juez, sesiones  # noqa: E402
 from achique.auditoria import RegistroAuditoria, verificar_cadena  # noqa: E402
 from achique.mesa import Mesa  # noqa: E402
 
@@ -436,3 +436,83 @@ class TestMesaConIngreso(ConSimulador):
         estado, cab, _ = self._pedir("POST", "/logout", cookie=cookie_a)
         self.assertEqual((estado, cab["Location"]), (303, "/login?salio=1"))
         self.assertEqual(self._pedir("GET", "/fragmento", cookie=cookie_a)[0], 401)
+
+
+class TestReanudacion(ConSimulador):
+    """Tras un reinicio con el mismo log, la plataforma retoma sin duplicar expedientes ni órdenes."""
+
+    def _plataforma(self):
+        auditoria = RegistroAuditoria(Path(self.tmp.name) / "auditoria.jsonl")
+        mesa = Mesa(auditoria)
+        builder = evidencia.ExpedienteBuilder("http://sim")
+        d = despacho.Despachador("http://sim", mesa, self.jueces, auditoria)
+        gestor = reclamos.GestorReclamos("http://sim", mesa, d)
+        ingesta = plataforma.Ingesta("http://sim", mesa, builder, gestor, auditoria, Path(self.tmp.name) / "exp")
+        return auditoria, mesa, builder, d, gestor, ingesta
+
+    def _reanudar(self, partes):
+        auditoria, mesa, builder, d, gestor, ingesta = partes
+        return reanudacion.reanudar(auditoria.ruta, ingesta.carpeta, mesa, builder, ingesta, d, gestor, auditoria)
+
+    def test_retoma_despachados_y_pendientes_sin_duplicar(self):
+        self.auditoria._archivo.close()
+        p1 = self._plataforma()
+        auditoria, mesa, builder, d, gestor, ingesta = p1
+        ingesta.procesar(deteccion("D-1"))
+        ingesta.procesar(deteccion("D-1b"))                                   # re-detección del mismo servidor
+        ingesta.procesar(deteccion("D-2", host="live.otro.test", ip="198.51.100.20"))
+        exp1 = mesa.expedientes["EXP-2026-000001"].expediente
+        mesa.decidir_expediente(exp1.id, True, "jueza-a")
+        d.despachar_expediente(exp1)
+        self.assertEqual(len(self.sim.recibidas), 2)
+        auditoria._archivo.close()
+
+        p2 = self._plataforma()
+        resumen = self._reanudar(p2)
+        auditoria2, mesa2, builder2, d2, gestor2, ingesta2 = p2
+        self.assertEqual((resumen["expedientes"], resumen["pendientes"], resumen["ordenes"]), (2, 1, 2))
+        self.assertEqual(mesa2.expedientes[exp1.id].estado, "despachado")
+        self.assertEqual(len(mesa2.expedientes[exp1.id].expediente.detecciones_adicionales), 1)
+        self.assertEqual(mesa2.expedientes["EXP-2026-000002"].estado, "pendiente")
+        self.assertEqual(builder2._contador, 2)
+        # Las mismas detecciones no abren nada nuevo; una nueva sigue la numeración.
+        for det in (deteccion("D-1"), deteccion("D-1b"), deteccion("D-2", host="live.otro.test", ip="198.51.100.20")):
+            ingesta2.procesar(det)
+        self.assertEqual(len(mesa2.expedientes), 2)
+        ingesta2.procesar(deteccion("D-3", host="solo.pirata.test", ip="203.0.113.50"))
+        self.assertIn("EXP-2026-000003", mesa2.expedientes)
+        # Las órdenes ya enviadas se siguen (no se reenvían) y los ids nuevos no chocan.
+        d2.despachar_expediente(exp1)
+        self.assertEqual(len(self.sim.recibidas), 2)
+        d2.seguir_ordenes()
+        self.assertEqual({o.estado for o in d2.lista_ordenes()}, {"aplicada"})
+        self.assertTrue(all(o.juez_id == "jueza-a" for o in d2.lista_ordenes()))
+        self.assertEqual(d2._nuevo_orden_id("x"), "ord-x-3")
+        self.assertEqual(len(mesa2.vista_transparencia()), 2)
+        self.assertTrue(verificar_cadena(auditoria2.ruta))
+        auditoria2._archivo.close()
+
+    def test_aprobado_a_medio_despachar_completa_lo_que_falta(self):
+        self.auditoria._archivo.close()
+        p1 = self._plataforma()
+        auditoria, mesa, builder, d, gestor, ingesta = p1
+        ingesta.procesar(deteccion("D-1"))
+        exp = mesa.expedientes["EXP-2026-000001"].expediente
+        mesa.decidir_expediente(exp.id, True, "jueza-a")
+        d.enviar_orden("grande", exp.id, "ip", "203.0.113.10", 105, "jueza-a")  # se cayó antes del segundo proveedor
+        auditoria._archivo.close()
+
+        p2 = self._plataforma()
+        self._reanudar(p2)
+        auditoria2, mesa2, _, d2, _, _ = p2
+        self.assertEqual(mesa2.expedientes[exp.id].estado, "aprobado")
+        d2.despachar_expediente(mesa2.expedientes[exp.id].expediente)
+        self.assertEqual([p for p, _ in self.sim.recibidas], ["grande", "chico"])
+        self.assertEqual(mesa2.expedientes[exp.id].estado, "despachado")
+        auditoria2._archivo.close()
+
+    def test_log_vacio_es_arranque_normal(self):
+        self.auditoria._archivo.close()
+        p = self._plataforma()
+        self.assertIsNone(self._reanudar(p))
+        p[0]._archivo.close()
