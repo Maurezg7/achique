@@ -158,3 +158,4 @@ oficial `desafio-futbol` y no están copiados acá. Usamos un asistente de códi
 - `evaluacion_practica.txt` — salida de `verificar.py`.
 - `propuesta_normativa.md` — propuesta normativa de 1 página.
 - `presentacion.pptx` y `guion_pitch.md` — pitch. El video demo (`demo.mp4`) no se versiona: se sube a Hacki.
+- `guion_video.md` — guion del video publicitario (escenas, textos en pantalla y locución); `achique_logo.svg` / `achique_logo.png` — logo de Achique. El video tampoco se versiona.
