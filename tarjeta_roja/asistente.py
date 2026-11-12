@@ -18,8 +18,9 @@ from .evidencia import dominio_base
 # Minutos de partido que un expediente puede esperar firma antes de avisar (la velocidad se evalúa).
 ESPERA_ATENCION_MIN = 1.0
 ESPERA_CRITICA_MIN = 2.5
-# Minutos desde que un proveedor aplicó el bloqueo para que los demás también confirmen.
-CONFIRMACION_ATENCION_MIN = 1.5
+# Minutos desde que un proveedor aplicó el bloqueo para que los demás también confirmen. Los proveedores
+# chicos tardan hasta ~6′ en aplicar (en la práctica FibraValle confirma 4–5,5′ después de Aurora).
+CONFIRMACION_ATENCION_MIN = 7.0
 AVISO_FIN_MIN = 10.0
 AVISO_TURNO_MIN = 5.0
 NIVELES = ("critico", "atencion", "info", "ok")
