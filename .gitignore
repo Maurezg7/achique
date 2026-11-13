@@ -9,3 +9,6 @@ entrega/grabacion_demo/
 # Logs y salidas locales
 *.log
 salida/
+
+# Material interno del equipo (no va al repo)
+privado/

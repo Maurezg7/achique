@@ -32,7 +32,7 @@ Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entr
 | Ingreso y firma de turno | Login con usuario y contraseña (`sesiones.py`); firma solo el juez que inició sesión, aprobó y sigue de turno; al cambio de turno lo pendiente pasa al entrante |
 | Auditoría | `python3 -m achique.auditoria entrega/auditoria_ejemplo.jsonl` → *Cadena íntegra: SÍ* |
 | Transparencia | `/transparencia` y `/transparencia.json` |
-| Pitch | `entrega/presentacion.pptx`, `entrega/guion_pitch.md`, `entrega/guion_video.md` |
+| Pitch | `entrega/presentacion.pptx` |
 
 ## Qué agrega frente a otros países
 
@@ -256,9 +256,8 @@ La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la 
   órdenes, confirmaciones y vencimientos.
 - `evaluacion_practica.txt` — salida de `verificar.py` de esa corrida.
 - `propuesta_normativa.md` — propuesta normativa de 1 página.
-- `presentacion.pptx` y `guion_pitch.md` — pitch.
-- `guion_video.md` — guion del video de demo y del video publicitario; `achique_logo.svg` / `achique_logo.png` —
-  logo de Achique.
+- `presentacion.pptx` — diapositivas del pitch.
+- `achique_logo.svg` / `achique_logo.png` — logo de Achique.
 
 **El día 3**, `python3 -m achique.entrega …` (ver [Cómo correrla](#cómo-correrla)) agrega los del partido final:
 `auditoria_final.jsonl`, `expediente_final.json`, `expediente_final_ip.json` y `evaluacion_final.txt`.
@@ -269,6 +268,6 @@ La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la 
 | 2. Video de demo (hasta 3 min) | se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
 | 3. Expediente y auditoría del partido final | `entrega/*_final*`, generados el día 3 |
 | 4. Propuesta normativa | `entrega/propuesta_normativa.md` |
-| 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` y `entrega/guion_pitch.md` |
+| 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` |
 
 No hay nada que desplegar: la plataforma corre en la máquina del equipo y se conecta al simulador con `--simulador`.
