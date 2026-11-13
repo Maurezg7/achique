@@ -265,7 +265,7 @@ La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la 
 | Entregable de las bases | Dónde va |
 |---|---|
 | 1. Repositorio público con código y README | este repo |
-| 2. Video de demo (hasta 3 min) | se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
+| 2. Video de demo (hasta 3 min) | <https://youtu.be/UZ453f-7K7E> · se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
 | 3. Expediente y auditoría del partido final | `entrega/*_final*`, generados el día 3 |
 | 4. Propuesta normativa | `entrega/propuesta_normativa.md` |
 | 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` |
