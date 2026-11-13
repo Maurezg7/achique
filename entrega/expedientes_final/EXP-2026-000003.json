@@ -1,0 +1,57 @@
+{
+  "id": "EXP-2026-000003",
+  "deteccion_id": "D-0005",
+  "minuto_deteccion": 12.0,
+  "host_stream": "hd.mirapartido.test",
+  "stream_url": "https://hd.mirapartido.test/hls/en-vivo/index.m3u8",
+  "pagina": "https://mirapartido.test/en-vivo",
+  "ip_servidor": "192.0.2.120",
+  "asn": 64620,
+  "organizacion": "Pampa Web Hosting Compartido (ficticio)",
+  "marca_de_agua": "LP26-FIN-OFI-S031877",
+  "prefijo_coincidente": "LP26-FIN-OFI",
+  "origen_marca": "Señal oficial del titular (plataforma propia)",
+  "dominios_en_la_ip": [
+    "hd.mirapartido.test",
+    "mirapartido.test",
+    "ferreteria-central.test",
+    "jardin-de-infantes-7.test",
+    "consultorio-odontologico-sur.test",
+    "coro-municipal-ejemplo.test"
+  ],
+  "otros_sitios_en_la_ip": [
+    "consultorio-odontologico-sur.test",
+    "coro-municipal-ejemplo.test",
+    "ferreteria-central.test",
+    "jardin-de-infantes-7.test"
+  ],
+  "riesgo_colateral": true,
+  "motivo_riesgo": "La IP también sirve 4 sitio(s) de otros dominios",
+  "tipo_recomendado": "dominio",
+  "objetivo_recomendado": "hd.mirapartido.test",
+  "hash_captura": "1f6515d22d26597cad963315282859d85f9d1567c78acc802603b376c6889326",
+  "captura_formato": "mpegts",
+  "captura_duracion_seg": 6,
+  "hash_deteccion": "424530a4aeca4da43898955842bf8a7e5ee2a5d4bb21fda5e6c11d1c62ea6729",
+  "sellos_tiempo": [
+    12.0
+  ],
+  "sello_utc": "2026-11-13T14:14:03+00:00",
+  "vencimiento_propuesto": 105,
+  "verificaciones": [
+    "Marca de agua LP26-FIN-OFI-S031877 coincide con 'Señal oficial del titular (plataforma propia)' (LP26-FIN-OFI)",
+    "hd.mirapartido.test no es dominio autorizado de un licenciatario",
+    "Servidor del video: hd.mirapartido.test → 192.0.2.120 (ASN 64620, Pampa Web Hosting Compartido (ficticio))",
+    "La IP también sirve 4 sitio(s) de otros dominios",
+    "Captura mpegts de 6 s, SHA-256 calculado"
+  ],
+  "promocion": [
+    {
+      "red": "telegram",
+      "url": "https://t.example/mirapartido",
+      "minuto": 10.0
+    }
+  ],
+  "detecciones_adicionales": [],
+  "hash_expediente": "a345b3dc28bf17e7ceaf1ec767a0389f8a5719dad93b32d2f403f69055bd7be5"
+}

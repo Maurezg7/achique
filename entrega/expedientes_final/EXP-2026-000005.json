@@ -1,0 +1,47 @@
+{
+  "id": "EXP-2026-000005",
+  "deteccion_id": "D-0012",
+  "minuto_deteccion": 30.0,
+  "host_stream": "relay.tvgol-gratis.test",
+  "stream_url": "https://relay.tvgol-gratis.test/hls/en-vivo/index.m3u8",
+  "pagina": "https://tvgol-gratis.test/canal-sur",
+  "ip_servidor": "203.0.113.90",
+  "asn": 64600,
+  "organizacion": "Bruma Hosting Dedicado (ficticio)",
+  "marca_de_agua": "LP26-FIN-LIC-SUR",
+  "prefijo_coincidente": "LP26-FIN-LIC-SUR",
+  "origen_marca": "Licenciatario autorizado: Canal Sur Andino (ficticio)",
+  "dominios_en_la_ip": [
+    "relay.tvgol-gratis.test"
+  ],
+  "otros_sitios_en_la_ip": [],
+  "riesgo_colateral": false,
+  "motivo_riesgo": "La IP solo sirve dominios del mismo sitio pirata",
+  "tipo_recomendado": "ip",
+  "objetivo_recomendado": "203.0.113.90",
+  "hash_captura": "ec5e5c35d592401d51396ca710242d53473f5c87d17ac01558316524db75a855",
+  "captura_formato": "mpegts",
+  "captura_duracion_seg": 6,
+  "hash_deteccion": "afb63e7a62cc765bbcf7849f3e4424d5b983e2e3a3240de49dcb824d1885d747",
+  "sellos_tiempo": [
+    30.0
+  ],
+  "sello_utc": "2026-11-13T14:20:03+00:00",
+  "vencimiento_propuesto": 105,
+  "verificaciones": [
+    "Marca de agua LP26-FIN-LIC-SUR coincide con 'Licenciatario autorizado: Canal Sur Andino (ficticio)' (LP26-FIN-LIC-SUR)",
+    "relay.tvgol-gratis.test no es dominio autorizado de un licenciatario",
+    "Servidor del video: relay.tvgol-gratis.test → 203.0.113.90 (ASN 64600, Bruma Hosting Dedicado (ficticio))",
+    "La IP solo sirve dominios del mismo sitio pirata",
+    "Captura mpegts de 6 s, SHA-256 calculado"
+  ],
+  "promocion": [
+    {
+      "red": "x",
+      "url": "https://x.example/tvgolgratis/status/9310",
+      "minuto": 28.0
+    }
+  ],
+  "detecciones_adicionales": [],
+  "hash_expediente": "c25ae53828d1823e2ed95c1defa6b16fa5ef1857ac2968174213badfa547ab0c"
+}

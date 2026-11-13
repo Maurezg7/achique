@@ -1,0 +1,48 @@
+{
+  "id": "EXP-2026-000004",
+  "deteccion_id": "D-0011",
+  "minuto_deteccion": 26.0,
+  "host_stream": "sb.futbolpasion.test",
+  "stream_url": "https://sb.futbolpasion.test/hls/en-vivo/index.m3u8",
+  "pagina": "https://futbolpasion.test/hoy",
+  "ip_servidor": "203.0.113.61",
+  "asn": 64600,
+  "organizacion": "Bruma Hosting Dedicado (ficticio)",
+  "marca_de_agua": "LP26-FIN-OFI-S020318",
+  "prefijo_coincidente": "LP26-FIN-OFI",
+  "origen_marca": "Señal oficial del titular (plataforma propia)",
+  "dominios_en_la_ip": [
+    "sb.futbolpasion.test",
+    "sb-alt.futbolpasion.test"
+  ],
+  "otros_sitios_en_la_ip": [],
+  "riesgo_colateral": false,
+  "motivo_riesgo": "La IP solo sirve dominios del mismo sitio pirata",
+  "tipo_recomendado": "ip",
+  "objetivo_recomendado": "203.0.113.61",
+  "hash_captura": "825351ab4ef10e5aa12add229f4f8eb50e8d06091c77f4998d114282c076bdd6",
+  "captura_formato": "mpegts",
+  "captura_duracion_seg": 6,
+  "hash_deteccion": "f4d2550e2a34b8a8577a5579786ca1262bfea4658508eec34b76b1af1e4fb02c",
+  "sellos_tiempo": [
+    26.0
+  ],
+  "sello_utc": "2026-11-13T14:18:43+00:00",
+  "vencimiento_propuesto": 105,
+  "verificaciones": [
+    "Marca de agua LP26-FIN-OFI-S020318 coincide con 'Señal oficial del titular (plataforma propia)' (LP26-FIN-OFI)",
+    "sb.futbolpasion.test no es dominio autorizado de un licenciatario",
+    "Servidor del video: sb.futbolpasion.test → 203.0.113.61 (ASN 64600, Bruma Hosting Dedicado (ficticio))",
+    "La IP solo sirve dominios del mismo sitio pirata",
+    "Captura mpegts de 6 s, SHA-256 calculado"
+  ],
+  "promocion": [
+    {
+      "red": "x",
+      "url": "https://x.example/futbolpasion_ar/status/9001",
+      "minuto": 1.0
+    }
+  ],
+  "detecciones_adicionales": [],
+  "hash_expediente": "e0e31685259660f4effbef5b8c82f683e30865566c3f5815eeadabf9f087c0a8"
+}

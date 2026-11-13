@@ -113,16 +113,15 @@ Si un expediente exportado falta, quedó cortado o no verifica su sello, se **re
 con el mismo número (`expediente_reconstruido`); si ya estaba aprobado pero no despachado, vuelve a la Mesa para
 que un juez lo decida de nuevo.
 
-**Entregables del partido final** (expediente, auditoría y evaluación) en un paso, desde `mi_solucion-futbol/`:
+**Entregables del partido final** (expediente y auditoría) en un paso, desde `mi_solucion-futbol/`:
 
 ```bash
-python3 -m achique.entrega --registro ../desafio-futbol/salida/registro.jsonl \
-    --auditoria ../desafio-futbol/salida/auditoria.jsonl --expedientes ../desafio-futbol/salida/expedientes \
-    --verificar ../desafio-futbol/evaluacion/verificar.py
+python3 -m achique.entrega --auditoria salida/auditoria.jsonl --expedientes salida/expedientes
 ```
 
-Deja `entrega/auditoria_final.jsonl`, `entrega/expediente_final.json` (por dominio), `entrega/expediente_final_ip.json`
-y `entrega/evaluacion_final.txt`; después, commit y push antes del cierre.
+Deja `entrega/auditoria_final.jsonl`, `entrega/expediente_final.json` (por dominio) y `entrega/expediente_final_ip.json`.
+Con `--registro <log del simulador> --verificar ../desafio-futbol/evaluacion/verificar.py` agrega además
+`evaluacion_final.txt`; en el final el simulador fue remoto y ese log lo tiene la organización, así que se omitió.
 
 Tests (sin dependencias, sin red):
 
@@ -259,14 +258,27 @@ La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la 
 - `presentacion.pptx` — diapositivas del pitch.
 - `achique_logo.svg` / `achique_logo.png` — logo de Achique.
 
-**El día 3**, `python3 -m achique.entrega …` (ver [Cómo correrla](#cómo-correrla)) agrega los del partido final:
-`auditoria_final.jsonl`, `expediente_final.json`, `expediente_final_ip.json` y `evaluacion_final.txt`.
+**Partido final** (13/11/2026, `final-01`, simulador remoto de la organización, acelerado ×3), generados con
+`python3 -m achique.entrega …` (ver [Cómo correrla](#cómo-correrla)):
+
+- `auditoria_final.jsonl` — auditoría completa del final (211 eventos, cadena íntegra): ingreso de los dos jueces,
+  8 decisiones, 40 órdenes enviadas, 32 confirmadas, 8 fallidas con su reintento y 32 vencidas al minuto 105.
+- `expediente_final.json` — `EXP-2026-000002`, `play.estadio-libre.test`: IP compartida con 9 sitios legítimos, orden
+  por dominio.
+- `expediente_final_ip.json` — `EXP-2026-000001`, `sa.futbolpasion.test`: IP dedicada, orden por IP.
+- `expedientes_final/` — los 8 expedientes del partido, con sello íntegro.
+
+Resultado: 8 detecciones de streams piratas, 8 expedientes firmados por el juez de turno (5 la Dra. Laura Ficticia en
+el primer tiempo, 3 el Dr. Martín Ejemplo tras el cambio de turno del minuto 50), cada uno confirmado antes de firmar;
+2 por dominio por IP compartida y 6 por IP; 0 sitios legítimos afectados, 0 firmas fuera de turno, 0 rechazos de
+proveedores; detección → bloqueo 2,3 min en promedio; 0 bloqueos por IP activos después del partido. La evaluación con
+`verificar.py` la corre la organización con su log del simulador.
 
 | Entregable de las bases | Dónde va |
 |---|---|
 | 1. Repositorio público con código y README | este repo |
 | 2. Video de demo (hasta 3 min) | <https://youtu.be/UZ453f-7K7E> · se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
-| 3. Expediente y auditoría del partido final | `entrega/*_final*`, generados el día 3 |
+| 3. Expediente y auditoría del partido final | `entrega/*_final*` y `entrega/expedientes_final/` |
 | 4. Propuesta normativa | `entrega/propuesta_normativa.md` |
 | 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` |
 

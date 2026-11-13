@@ -1,0 +1,66 @@
+{
+  "id": "EXP-2026-000002",
+  "deteccion_id": "D-0003",
+  "minuto_deteccion": 4.0,
+  "host_stream": "play.estadio-libre.test",
+  "stream_url": "https://play.estadio-libre.test/hls/en-vivo/index.m3u8",
+  "pagina": "https://estadio-libre.test/ver",
+  "ip_servidor": "198.51.100.140",
+  "asn": 64610,
+  "organizacion": "NubeRápida CDN (ficticia)",
+  "marca_de_agua": "LP26-FIN-OFI-S055120",
+  "prefijo_coincidente": "LP26-FIN-OFI",
+  "origen_marca": "Señal oficial del titular (plataforma propia)",
+  "dominios_en_la_ip": [
+    "play.estadio-libre.test",
+    "diario-salteno-ejemplo.example",
+    "farmacia-central-ejemplo.test",
+    "bodega-valle-calchaqui.example",
+    "gimnasio-ejemplo.test",
+    "agencia-de-viajes-norte.test",
+    "colegio-san-ejemplo.test",
+    "tienda-de-ponchos.example",
+    "cooperativa-agua-ejemplo.test",
+    "hotel-plaza-ejemplo.test"
+  ],
+  "otros_sitios_en_la_ip": [
+    "agencia-de-viajes-norte.test",
+    "bodega-valle-calchaqui.example",
+    "colegio-san-ejemplo.test",
+    "cooperativa-agua-ejemplo.test",
+    "diario-salteno-ejemplo.example",
+    "farmacia-central-ejemplo.test",
+    "gimnasio-ejemplo.test",
+    "hotel-plaza-ejemplo.test",
+    "tienda-de-ponchos.example"
+  ],
+  "riesgo_colateral": true,
+  "motivo_riesgo": "La IP también sirve 9 sitio(s) de otros dominios",
+  "tipo_recomendado": "dominio",
+  "objetivo_recomendado": "play.estadio-libre.test",
+  "hash_captura": "8c706aa5bb28a95aef2ec9d2c8e6902159d1cae74299cd60da75be2b77cb9fad",
+  "captura_formato": "mpegts",
+  "captura_duracion_seg": 6,
+  "hash_deteccion": "afb8f1d90bd7f85b2c9ad9cd43d6761612a2d7287ddfeee9d07f125e46f9a90d",
+  "sellos_tiempo": [
+    4.0
+  ],
+  "sello_utc": "2026-11-13T14:11:23+00:00",
+  "vencimiento_propuesto": 105,
+  "verificaciones": [
+    "Marca de agua LP26-FIN-OFI-S055120 coincide con 'Señal oficial del titular (plataforma propia)' (LP26-FIN-OFI)",
+    "play.estadio-libre.test no es dominio autorizado de un licenciatario",
+    "Servidor del video: play.estadio-libre.test → 198.51.100.140 (ASN 64610, NubeRápida CDN (ficticia))",
+    "La IP también sirve 9 sitio(s) de otros dominios",
+    "Captura mpegts de 6 s, SHA-256 calculado"
+  ],
+  "promocion": [
+    {
+      "red": "discord",
+      "url": "https://discord.example/invite/estadio-libre",
+      "minuto": 2.0
+    }
+  ],
+  "detecciones_adicionales": [],
+  "hash_expediente": "bc6792d35517f3a7a0584b074af05609a338dce57ec3c122c130aea198094129"
+}

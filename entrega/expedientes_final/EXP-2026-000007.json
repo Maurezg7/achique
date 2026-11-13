@@ -1,0 +1,52 @@
+{
+  "id": "EXP-2026-000007",
+  "deteccion_id": "D-0031",
+  "minuto_deteccion": 70.0,
+  "host_stream": "a1.canalpirata-hd.test",
+  "stream_url": "https://a1.canalpirata-hd.test/hls/en-vivo/index.m3u8",
+  "pagina": "https://canalpirata-hd.test/vip",
+  "ip_servidor": "203.0.113.95",
+  "asn": 64600,
+  "organizacion": "Bruma Hosting Dedicado (ficticio)",
+  "marca_de_agua": "LP26-FIN-OFI-S088004",
+  "prefijo_coincidente": "LP26-FIN-OFI",
+  "origen_marca": "Señal oficial del titular (plataforma propia)",
+  "dominios_en_la_ip": [
+    "a1.canalpirata-hd.test"
+  ],
+  "otros_sitios_en_la_ip": [],
+  "riesgo_colateral": false,
+  "motivo_riesgo": "La IP solo sirve dominios del mismo sitio pirata",
+  "tipo_recomendado": "ip",
+  "objetivo_recomendado": "203.0.113.95",
+  "hash_captura": "98e1a7c709f4d6b304ed5cdf8a9083f0b93468de62187909c7891fa07c7f4a2a",
+  "captura_formato": "mpegts",
+  "captura_duracion_seg": 6,
+  "hash_deteccion": "cf5668a3d6cf5434428f1913b87a0f0641fbf8ac2a5c4d111884af449c614c77",
+  "sellos_tiempo": [
+    70.0
+  ],
+  "sello_utc": "2026-11-13T14:33:23+00:00",
+  "vencimiento_propuesto": 105,
+  "verificaciones": [
+    "Marca de agua LP26-FIN-OFI-S088004 coincide con 'Señal oficial del titular (plataforma propia)' (LP26-FIN-OFI)",
+    "a1.canalpirata-hd.test no es dominio autorizado de un licenciatario",
+    "Servidor del video: a1.canalpirata-hd.test → 203.0.113.95 (ASN 64600, Bruma Hosting Dedicado (ficticio))",
+    "La IP solo sirve dominios del mismo sitio pirata",
+    "Captura mpegts de 6 s, SHA-256 calculado"
+  ],
+  "promocion": [
+    {
+      "red": "telegram",
+      "url": "https://t.example/canalpiratahd",
+      "minuto": 68.0
+    },
+    {
+      "red": "discord",
+      "url": "https://discord.example/invite/canalpirata",
+      "minuto": 69.0
+    }
+  ],
+  "detecciones_adicionales": [],
+  "hash_expediente": "a4fa530d0d56b00be2c9d32e093b36b6ca015734556ca4f1ca2c1a854b4f8b60"
+}
