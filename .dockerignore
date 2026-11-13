@@ -1,0 +1,5 @@
+.git
+privado/
+salida/
+__pycache__/
+*.mp4

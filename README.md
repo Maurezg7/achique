@@ -271,3 +271,9 @@ La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la 
 | 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` |
 
 No hay nada que desplegar: la plataforma corre en la máquina del equipo y se conecta al simulador con `--simulador`.
+
+**Demo pública (opcional).** Para que el jurado pruebe la Mesa desde un link, `demo/demo_publico.sh` corre el
+simulador oficial con el partido de práctica y Achique, y cuando el partido termina arranca otro. El `Dockerfile`
+empaqueta eso (clona `desafio-futbol` adentro de la imagen) para cualquier hosting de contenedores; la Mesa
+escucha en `$PORT` (8090) y la pantalla de ingreso muestra los usuarios de demostración. Sin Docker:
+`SIM=../desafio-futbol ACELERAR=6 ./demo/demo_publico.sh`. Las sesiones se pierden al cambiar de partido.

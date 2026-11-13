@@ -14,6 +14,7 @@ Las decisiones se cargan en la Mesa; el hilo de despacho (despacho.py) recién f
 una decisión "aprobada". El juez nunca ve ni toca la clave de firma.
 """
 import json
+import os
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -159,6 +160,11 @@ class JuezHandler(BaseHTTPRequestHandler):
         if query.get("salio"):
             aviso = "Sesión cerrada."
         aviso_html = f"<p class='login-aviso{' error' if error else ''}'>{_escape(aviso)}</p>" if aviso else ""
+        if os.environ.get("ACHIQUE_DEMO"):
+            # Demo pública: partido de práctica en loop con los usuarios de demostración a la vista.
+            aviso_html += ("<p class='login-aviso'>Demo pública con el partido de práctica del simulador oficial, "
+                           "en loop. Jueza del primer tiempo: <b>laura</b> / <b>laura-demo-2026</b> · "
+                           "juez del segundo: <b>martin</b> / <b>martin-demo-2026</b>.</p>")
         return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{NOMBRE} · Ingreso del juez</title>
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/estilos.css">
