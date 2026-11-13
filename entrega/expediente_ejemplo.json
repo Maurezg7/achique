@@ -49,7 +49,7 @@
   "sellos_tiempo": [
     6.0
   ],
-  "sello_utc": "2026-11-11T18:53:13+00:00",
+  "sello_utc": "2026-11-12T23:38:38+00:00",
   "vencimiento_propuesto": 105,
   "verificaciones": [
     "Marca de agua LP26-PRA-OFI-S077310 coincide con 'Señal oficial del titular (plataforma propia)' (LP26-PRA-OFI)",
@@ -71,5 +71,5 @@
     }
   ],
   "detecciones_adicionales": [],
-  "hash_expediente": "6e6df9864b426cbd2d959ef5b9683c531a3426741e1e63857c20ff2ee690e768"
+  "hash_expediente": "d84186c9d1114761e51d91db04f1ce6ad47da76cff951df1882c4efe5abfd89f"
 }

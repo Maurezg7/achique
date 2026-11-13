@@ -2,10 +2,10 @@ Evaluación del escenario practica-01 (registro hasta el minuto 110.0)
 
 Resumen
   fases piratas bloqueadas: 7 de 7
-  visibilidad residual promedio pct: 6.6
-  ordenes recibidas: 31
+  visibilidad residual promedio pct: 3.9
+  ordenes recibidas: 30
   ordenes aplicadas: 28
-  ordenes fallidas: 3
+  ordenes fallidas: 2
   ordenes rechazadas: 0
   bloqueos con dano colateral: 0
   dominios legitimos afectados: 0
@@ -16,13 +16,13 @@ Resumen
   ordenes firmadas fuera de turno: 0
 
 1. Streams piratas por fase
-  pelotaya fase 1 (203.0.113.10 / s1.pelotaya.test, min 2–36): primer bloqueo 1.8 min · clientes cubiertos 100.0 % · visibilidad residual 6.9 %
-  pelotaya fase 2 (203.0.113.11 / s2.pelotaya.test, min 37.5–70): primer bloqueo 1.8 min · clientes cubiertos 100.0 % · visibilidad residual 7.2 %
-  pelotaya fase 3 (198.51.100.77 / s3.pelotaya.test, min 71–105): primer bloqueo 1.6 min · clientes cubiertos 100.0 % · visibilidad residual 6.4 %
-  golazo-cdn fase 1 (198.51.100.20 / live.golazo-libre.test, min 6–105): primer bloqueo 1.8 min · clientes cubiertos 100.0 % · visibilidad residual 2.6 %
-  verpartido fase 1 (192.0.2.50 / tv.verpartido-hd.test, min 9–105): primer bloqueo 1.9 min · clientes cubiertos 100.0 % · visibilidad residual 2.6 %
-  tribuna fase 1 (203.0.113.40 / x9.tribuna-pirata.test, min 55–81): primer bloqueo 1.9 min · clientes cubiertos 100.0 % · visibilidad residual 9.5 %
-  tribuna fase 2 (203.0.113.41 / x10.tribuna-pirata.test, min 82–105): primer bloqueo 2.1 min · clientes cubiertos 100.0 % · visibilidad residual 10.9 %
+  pelotaya fase 1 (203.0.113.10 / s1.pelotaya.test, min 2–36): primer bloqueo 0.6 min · clientes cubiertos 100.0 % · visibilidad residual 3.3 %
+  pelotaya fase 2 (203.0.113.11 / s2.pelotaya.test, min 37.5–70): primer bloqueo 0.6 min · clientes cubiertos 100.0 % · visibilidad residual 3.5 %
+  pelotaya fase 3 (198.51.100.77 / s3.pelotaya.test, min 71–105): primer bloqueo 0.6 min · clientes cubiertos 100.0 % · visibilidad residual 3.0 %
+  golazo-cdn fase 1 (198.51.100.20 / live.golazo-libre.test, min 6–105): primer bloqueo 0.6 min · clientes cubiertos 100.0 % · visibilidad residual 1.3 %
+  verpartido fase 1 (192.0.2.50 / tv.verpartido-hd.test, min 9–105): primer bloqueo 6.0 min · clientes cubiertos 100.0 % · visibilidad residual 6.8 %
+  tribuna fase 1 (203.0.113.40 / x9.tribuna-pirata.test, min 55–81): primer bloqueo 0.5 min · clientes cubiertos 100.0 % · visibilidad residual 4.4 %
+  tribuna fase 2 (203.0.113.41 / x10.tribuna-pirata.test, min 82–105): primer bloqueo 0.7 min · clientes cubiertos 100.0 % · visibilidad residual 5.2 %
 
 2. Daño colateral
   Ningún bloqueo afectó sitios legítimos.

@@ -43,20 +43,24 @@ de Piracy Shield (Italia), que bloqueó sitios legítimos: si la IP es compartid
 
 ## Resultado en el partido de práctica
 
-`evaluacion/verificar.py` sobre una corrida completa (`--acelerar 30`, juez aprobando a mano). Salida
-completa en [`entrega/evaluacion_practica.txt`](entrega/evaluacion_practica.txt).
+`evaluacion/verificar.py` sobre una corrida completa del código actual (`--acelerar 12`), con los dos jueces
+ingresando con usuario y contraseña. Para medir la plataforma sin la demora humana, un arnés de prueba hizo de
+juez: inició sesión como cada juez y aprobó por el mismo camino que la Mesa, con la confirmación explícita; un
+expediente se dejó esperando y se firmó a mano en la Mesa. Salida completa en
+[`entrega/evaluacion_practica.txt`](entrega/evaluacion_practica.txt).
 
 | Métrica | Resultado |
 |---|---|
 | Fases piratas bloqueadas | **7 de 7**, todas con **100 % de clientes cubiertos** |
-| Primer bloqueo confirmado | 1,6 – 2,1 min desde la detección (incluye la decisión del juez) |
-| Visibilidad residual promedio | 6,6 % |
+| Primer bloqueo confirmado | 0,5 – 0,7 min desde la detección con aprobación inmediata; 6,0 min en el expediente firmado a mano |
+| Visibilidad residual promedio | 3,9 % |
 | Daño colateral / falsos positivos | **0 / 0** (ni el licenciatario ni el VOD de otro partido) |
 | Bloqueos por IP activos después del partido | **0** |
 | Órdenes rechazadas / firmadas fuera de turno | **0 / 0** (hubo cambio de turno en el minuto 50) |
 | Cadena de auditoría | íntegra (`python3 -m achique.auditoria entrega/auditoria_ejemplo.jsonl`) |
 
-La recomendación IP/dominio coincidió en los 7 expedientes con la `bloqueo_recomendado` de la verdad del escenario.
+Con un juez aprobando todo a mano (corrida anterior, `--acelerar 30`): primer bloqueo en 1,6 – 2,1 min y 6,6 % de
+visibilidad residual. El tiempo depende de cuánto tarda el juez en decidir; la plataforma no agrega espera.
 
 ## Cómo correrla
 
@@ -245,9 +249,26 @@ oficial `desafio-futbol` y no están copiados acá.
 
 ## Entregables (`entrega/`)
 
+La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la auditoría y la propuesta normativa.
+
 - `expediente_ejemplo.json` (dominio, IP compartida en CDN) y `expediente_ejemplo_ip.json` (IP dedicada).
-- `auditoria_ejemplo.jsonl` — auditoría completa de la corrida. **El día 3 se reemplazan por los del partido final.**
-- `evaluacion_practica.txt` — salida de `verificar.py`.
+- `auditoria_ejemplo.jsonl` — auditoría completa de la corrida de práctica: ingresos de los jueces, decisiones,
+  órdenes, confirmaciones y vencimientos.
+- `evaluacion_practica.txt` — salida de `verificar.py` de esa corrida.
 - `propuesta_normativa.md` — propuesta normativa de 1 página.
-- `presentacion.pptx` y `guion_pitch.md` — pitch. El video demo (`demo.mp4`) no se versiona: se sube a Hacki.
-- `guion_video.md` — guion del video publicitario (escenas, textos en pantalla y locución); `achique_logo.svg` / `achique_logo.png` — logo de Achique. El video tampoco se versiona.
+- `presentacion.pptx` y `guion_pitch.md` — pitch.
+- `guion_video.md` — guion del video de demo y del video publicitario; `achique_logo.svg` / `achique_logo.png` —
+  logo de Achique.
+
+**El día 3**, `python3 -m achique.entrega …` (ver [Cómo correrla](#cómo-correrla)) agrega los del partido final:
+`auditoria_final.jsonl`, `expediente_final.json`, `expediente_final_ip.json` y `evaluacion_final.txt`.
+
+| Entregable de las bases | Dónde va |
+|---|---|
+| 1. Repositorio público con código y README | este repo |
+| 2. Video de demo (hasta 3 min) | se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
+| 3. Expediente y auditoría del partido final | `entrega/*_final*`, generados el día 3 |
+| 4. Propuesta normativa | `entrega/propuesta_normativa.md` |
+| 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` y `entrega/guion_pitch.md` |
+
+No hay nada que desplegar: la plataforma corre en la máquina del equipo y se conecta al simulador con `--simulador`.
