@@ -14,7 +14,7 @@ Python 3.9+ y **solo biblioteca estándar**. Corre contra el simulador oficial; 
 Equipo y marca del pitch: **Achique** (logo en [`entrega/achique_logo.svg`](entrega/achique_logo.svg)).
 
 1. **Correr** (Python 3.9+, sin instalar nada): simulador oficial + plataforma, ver [Cómo correrla](#cómo-correrla).
-2. **Ingresar a la Mesa del juez** (`http://localhost:8090`) con un usuario de demostración (ver
+2. **Ingresar a la Mesa del juez** (`http://localhost:8090`, o la demo pública <https://achique-g8j6.onrender.com>) con un usuario de demostración (ver
    [Ingreso de los jueces](#ingreso-de-los-jueces)). La primera vez se abre una **guía de 13 pasos** (botón 🧭
    para volver a verla) que recorre marcador, expedientes, riesgo colateral, firma, reclamos, órdenes y registro público.
 3. **Aprobar los expedientes** con *Aprobar y firmar*. Antes de firmar, la Mesa pregunta **"¿Seguro que querés
@@ -272,7 +272,8 @@ La carpeta `entrega/` es parte del repo: las bases piden ahí el expediente, la 
 
 No hay nada que desplegar: la plataforma corre en la máquina del equipo y se conecta al simulador con `--simulador`.
 
-**Demo pública (opcional).** Para que el jurado pruebe la Mesa desde un link, `demo/demo_publico.sh` corre el
+**Demo pública:** <https://achique-g8j6.onrender.com> (plan gratuito: si estuvo sin visitas, tarda ~1 min en despertar).
+Para que el jurado pruebe la Mesa desde un link, `demo/demo_publico.sh` corre el
 simulador oficial con el partido de práctica y Achique, y cuando el partido termina arranca otro. El `Dockerfile`
 empaqueta eso (clona `desafio-futbol` adentro de la imagen) para cualquier hosting de contenedores; la Mesa
 escucha en `$PORT` (8090) y la pantalla de ingreso muestra los usuarios de demostración. Sin Docker:
