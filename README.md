@@ -277,7 +277,7 @@ proveedores; detección → bloqueo 2,3 min en promedio; 0 bloqueos por IP activ
 | Entregable de las bases | Dónde va |
 |---|---|
 | 1. Repositorio público con código y README | este repo |
-| 2. Video de demo (hasta 3 min) | <https://youtu.be/UZ453f-7K7E> · se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
+| 2. Video de demo (hasta 3 min) | <https://youtu.be/r0wfzTJWi90> · se carga en Hacki; **no** se versiona (`.gitignore` excluye `*.mp4`) |
 | 3. Expediente y auditoría del partido final | `entrega/*_final*` y `entrega/expedientes_final/` |
 | 4. Propuesta normativa | `entrega/propuesta_normativa.md` |
 | 5. Pitch | en vivo ante el jurado; apoyo en `entrega/presentacion.pptx` |
