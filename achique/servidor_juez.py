@@ -504,7 +504,7 @@ class JuezHandler(BaseHTTPRequestHandler):
         puntos = "".join(f"<li>{_escape(p)}</li>" for p in exp["puntos"])
         revisar = ("<small>Antes de decidir, revisá:</small><ul class='checks'>"
                    + "".join(f"<li>{_escape(r)}</li>" for r in exp["revisar"]) + "</ul>") if exp["revisar"] else ""
-        return (f"<details class='asis' id='asis-{_escape(item_id)}'><summary>🤖 Asistente: {_escape(exp['resumen'])}</summary>"
+        return (f"<details class='asis' id='asis-{_escape(item_id)}'><summary>Asistente: {_escape(exp['resumen'])}</summary>"
                 f"<ul>{puntos}</ul>{revisar}<p class='sugerencia'>{_escape(exp['sugerencia'])}</p></details>")
 
     def _card_expediente(self, d) -> str:
