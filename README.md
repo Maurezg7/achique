@@ -290,3 +290,7 @@ simulador oficial con el partido de práctica y Achique, y cuando el partido ter
 empaqueta eso (clona `desafio-futbol` adentro de la imagen) para cualquier hosting de contenedores; la Mesa
 escucha en `$PORT` (8090) y la pantalla de ingreso muestra los usuarios de demostración. Sin Docker:
 `SIM=../desafio-futbol ACELERAR=6 ./demo/demo_publico.sh`. Las sesiones se pierden al cambiar de partido.
+
+## Licencia
+
+Código publicado bajo licencia [MIT](LICENSE).
